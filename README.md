@@ -86,3 +86,4 @@ Run via Docker Compose:
 docker compose up --build
 ```
 Healthcheck is configured to verify container status via `curl http://localhost:8000/health`.
+

@@ -82,3 +82,4 @@ def get_doctor_slots(
             status="Available" if slot.is_available else "Booked"
         ))
     return result
+

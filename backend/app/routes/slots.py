@@ -114,3 +114,4 @@ def enable_slot(
         is_available=slot.is_available,
         status="Available"
     )
+

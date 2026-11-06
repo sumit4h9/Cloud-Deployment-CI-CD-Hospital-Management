@@ -29,3 +29,4 @@ def readiness_check(db: Session = Depends(get_db)):
             status_code=503,
             detail=f"Database readiness failed: {str(e)}"
         )
+

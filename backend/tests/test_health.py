@@ -17,3 +17,4 @@ def test_readiness_endpoint():
     data = response.json()
     assert data["status"] == "ready"
     assert data["database"] == "connected"
+

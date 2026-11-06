@@ -26,6 +26,38 @@ def record_audit(db: Session, event_type: str, actor_role: str, actor_id: str, d
     db.add(audit)
     db.commit()
 
+def validate_time_window(start_time: str, end_time: Optional[str]) -> str:
+    """Validates that appointment falls within valid clinic operating hours (08:00 - 18:00)."""
+    try:
+        sh, sm = map(int, start_time.split(":"))
+        if not (0 <= sh < 24 and 0 <= sm < 60):
+            raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid start_time format. Must be HH:MM.")
+
+    if sh < 8 or sh >= 18:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Appointment time {start_time} is outside clinic operating hours (08:00 - 18:00)."
+        )
+
+    if not end_time:
+        em = sm + 30
+        eh = sh + (em // 60)
+        em = em % 60
+        end_time = f"{eh:02d}:{em:02d}"
+    else:
+        try:
+            eh, em = map(int, end_time.split(":"))
+            if eh * 60 + em <= sh * 60 + sm:
+                raise HTTPException(status_code=400, detail="end_time must be later than start_time.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid end_time format. Must be HH:MM.")
+
+    return end_time
+
 @router.get("", response_model=List[AppointmentOut])
 def list_appointments(
     doctor_id: Optional[str] = None,
@@ -101,10 +133,12 @@ def create_appointment(
     Validates doctor & patient references.
     Prevents double-booking even under concurrent requests.
     """
-    # 1. Validate Doctor & Patient references
+    # 1. Validate Doctor & Patient references and time windows
     doctor = db.query(Doctor).filter(Doctor.id == payload.doctor_id).first()
     if not doctor:
         raise HTTPException(status_code=400, detail=f"Doctor '{payload.doctor_id}' does not exist")
+
+    end_time = validate_time_window(payload.start_time, payload.end_time)
 
     patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
     if not patient:
@@ -170,15 +204,6 @@ def create_appointment(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Selected appointment slot is no longer available"
             )
-
-        # Calculate end_time if not provided (default 30 mins)
-        end_time = payload.end_time
-        if not end_time:
-            sh, sm = map(int, payload.start_time.split(":"))
-            em = sm + 30
-            eh = sh + (em // 60)
-            em = em % 60
-            end_time = f"{eh:02d}:{em:02d}"
 
         # Mark slot unavailable if slot exists
         if slot:

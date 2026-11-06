@@ -17,3 +17,4 @@ def list_audit_events(
     if event_type:
         query = query.filter(AuditEvent.event_type == event_type)
     return query.order_by(AuditEvent.timestamp.desc()).limit(limit).all()
+

@@ -647,7 +647,107 @@ body {
   cursor: not-allowed;
 }
 
-/* Alert notice */
+/* Login and Gateway Styles */
+.login-page-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #f8fafc;
+  padding: 24px;
+}
+
+.portal-gateway-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  max-width: 760px;
+  width: 100%;
+  padding: 36px 32px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.portal-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 28px;
+}
+
+.portal-selection-box {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.portal-selection-box:hover {
+  border-color: var(--primary);
+  background-color: #f8fafc;
+}
+
+.portal-selection-box.doctor-box:hover {
+  border-color: #0284c7;
+}
+
+.portal-selection-box.patient-box:hover {
+  border-color: #0d9488;
+}
+
+.portal-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.portal-icon-wrapper.doctor {
+  background-color: #f0f9ff;
+  color: #0284c7;
+}
+
+.portal-icon-wrapper.patient {
+  background-color: #f0fdfa;
+  color: #0d9488;
+}
+
+.login-form-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  max-width: 420px;
+  width: 100%;
+  padding: 32px 28px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.quick-account-pill {
+  font-size: 11px;
+  background-color: #f1f5f9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.quick-account-pill:hover {
+  background-color: var(--primary-subtle);
+  color: var(--primary);
+  border-color: var(--primary-border);
+}
+
 .feedback-banner {
   padding: 10px 14px;
   border-radius: var(--radius-md);

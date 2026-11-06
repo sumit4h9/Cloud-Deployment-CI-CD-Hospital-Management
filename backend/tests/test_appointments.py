@@ -73,3 +73,4 @@ def test_invalid_doctor_reference():
     }
     res = client.post("/api/v1/appointments", json=payload)
     assert res.status_code == 400
+
