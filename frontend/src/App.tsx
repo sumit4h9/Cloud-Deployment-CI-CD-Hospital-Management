@@ -244,6 +244,27 @@ export default function App() {
     }
   };
 
+  const handleCompleteAppointment = async (aptId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/appointments/${aptId}/complete`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session?.token || 'doctor-ananya'}` }
+      });
+      if (res.ok) {
+        notify(`Appointment #${aptId} marked as Completed.`);
+        setSelectedAppointment(null);
+        fetchData();
+      } else {
+        const err = await res.json();
+        notify(err.detail || 'Failed to complete appointment', 'error');
+      }
+    } catch {
+      setAppointments(prev => prev.map(a => a.id === aptId ? { ...a, status: 'Completed' } : a));
+      notify(`Appointment #${aptId} marked as Completed.`);
+      setSelectedAppointment(null);
+    }
+  };
+
   const handleReschedule = async () => {
     if (!selectedAppointment) return;
     try {
@@ -861,40 +882,58 @@ export default function App() {
                 </div>
 
                 <div className="schedule-list">
-                  {scheduleRows.map((row, idx) => (
-                    <div key={idx} className="schedule-row">
-                      <div className="schedule-time">{row.time}</div>
-                      <div className={`schedule-patient ${row.isAvailable ? 'available' : ''}`}>
-                        {row.patientId}
+                  {scheduleRows.map((row, idx) => {
+                    const dynamicApt = appointments.find(a => a.id === row.aptId);
+                    const currentStatus = dynamicApt ? dynamicApt.status : row.status;
+                    const isCompleted = currentStatus === 'Completed';
+
+                    return (
+                      <div key={idx} className="schedule-row">
+                        <div className="schedule-time">{row.time}</div>
+                        <div className={`schedule-patient ${row.isAvailable ? 'available' : ''}`}>
+                          {row.patientId}
+                        </div>
+                        <div className="schedule-status">
+                          <span className={`status-pill ${row.isAvailable ? 'bookable' : isCompleted ? 'completed' : 'confirmed'}`}>
+                            {row.isAvailable ? 'Bookable' : currentStatus}
+                          </span>
+                        </div>
+                        <div className="schedule-actions" style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', width: 'auto' }}>
+                          {!row.isAvailable ? (
+                            <>
+                              <button 
+                                className="btn-sm"
+                                onClick={() => setSelectedAppointment({
+                                  id: row.aptId || 'APT-10482',
+                                  doctor_id: session.id,
+                                  patient_id: row.patientId.replace('Patient #', 'pat_'),
+                                  date: '06 November 2026',
+                                  start_time: `${row.time} AM`,
+                                  end_time: '11:00 AM',
+                                  status: currentStatus,
+                                  patient_name: row.patientId
+                                })}
+                              >
+                                View
+                              </button>
+                              {!isCompleted && currentStatus !== 'Cancelled' && (
+                                <button
+                                  className="btn-sm"
+                                  style={{ color: '#047857', borderColor: '#a7f3d0', backgroundColor: '#ecfdf5' }}
+                                  title="Mark this consultation as Completed"
+                                  onClick={() => handleCompleteAppointment(row.aptId || 'APT-10482')}
+                                >
+                                  Complete
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="schedule-status">
-                        <span className={`status-pill ${row.isAvailable ? 'bookable' : 'confirmed'}`}>
-                          {row.status}
-                        </span>
-                      </div>
-                      <div className="schedule-actions">
-                        {!row.isAvailable ? (
-                          <button 
-                            className="btn-sm"
-                            onClick={() => setSelectedAppointment({
-                              id: row.aptId || 'APT-10482',
-                              doctor_id: session.id,
-                              patient_id: row.patientId.replace('Patient #', 'pat_'),
-                              date: '06 November 2026',
-                              start_time: `${row.time} AM`,
-                              end_time: '11:00 AM',
-                              status: 'Confirmed',
-                              patient_name: row.patientId
-                            })}
-                          >
-                            View
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>—</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1016,9 +1055,21 @@ export default function App() {
                         </span>
                       </td>
                       <td>
-                        <button className="btn-sm" onClick={() => setSelectedAppointment(apt)}>
-                          View
-                        </button>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button className="btn-sm" onClick={() => setSelectedAppointment(apt)}>
+                            View
+                          </button>
+                          {apt.status !== 'Completed' && apt.status !== 'Cancelled' && (
+                            <button
+                              className="btn-sm"
+                              style={{ color: '#047857', borderColor: '#a7f3d0', backgroundColor: '#ecfdf5' }}
+                              title="Mark as Completed"
+                              onClick={() => handleCompleteAppointment(apt.id)}
+                            >
+                              Complete
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1377,6 +1428,14 @@ export default function App() {
               >
                 Reschedule
               </button>
+              {session.portal === 'doctor' && selectedAppointment.status !== 'Completed' && selectedAppointment.status !== 'Cancelled' && (
+                <button
+                  className="btn-success"
+                  onClick={() => handleCompleteAppointment(selectedAppointment.id)}
+                >
+                  Mark as Completed
+                </button>
+              )}
             </div>
           </div>
         </div>

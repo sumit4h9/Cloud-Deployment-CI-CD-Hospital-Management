@@ -371,6 +371,29 @@ body {
   border: 1px solid var(--success-border);
 }
 
+.status-pill.completed {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.btn-success {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid #10b981;
+  background-color: #10b981;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-success:hover {
+  background-color: #059669;
+  border-color: #059669;
+}
+
 .status-pill.bookable {
   background-color: #f1f5f9;
   color: #475569;

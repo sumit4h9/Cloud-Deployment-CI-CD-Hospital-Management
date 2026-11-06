@@ -64,6 +64,24 @@ def test_appointment_lifecycle():
     if slot_1130:
         assert slot_1130["is_available"] is True
 
+def test_mark_appointment_completed():
+    # Book slot
+    create_payload = {
+        "doctor_id": "doc_1",
+        "patient_id": "pat_1055",
+        "date": "2026-11-06",
+        "start_time": "15:00",
+        "end_time": "15:30"
+    }
+    create_res = client.post("/api/v1/appointments", json=create_payload)
+    assert create_res.status_code == 201
+    apt_id = create_res.json()["id"]
+
+    # Mark as completed
+    comp_res = client.post(f"/api/v1/appointments/{apt_id}/complete")
+    assert comp_res.status_code == 200
+    assert comp_res.json()["status"] == "Completed"
+
 def test_invalid_doctor_reference():
     payload = {
         "doctor_id": "invalid_doc_999",

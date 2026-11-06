@@ -408,3 +408,50 @@ def cancel_appointment(
             patient_name=pat.name if pat else None,
             specialization=doc.specialization if doc else None
         )
+
+@router.post("/{appointment_id}/complete", response_model=AppointmentOut)
+def complete_appointment(
+    appointment_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Marks an appointment as Completed by the physician."""
+    with _booking_lock:
+        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if not apt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        if apt.status == "Cancelled":
+            raise HTTPException(status_code=400, detail="Cannot complete a cancelled appointment")
+
+        apt.status = "Completed"
+        apt.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(apt)
+
+        record_audit(
+            db,
+            event_type="APPOINTMENT_COMPLETED",
+            actor_role=current_user.role,
+            actor_id=current_user.id,
+            details={"appointment_id": apt.id, "doctor_id": apt.doctor_id}
+        )
+
+        doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
+        pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+
+        return AppointmentOut(
+            id=apt.id,
+            doctor_id=apt.doctor_id,
+            patient_id=apt.patient_id,
+            slot_id=apt.slot_id,
+            date=apt.date,
+            start_time=apt.start_time,
+            end_time=apt.end_time,
+            status=apt.status,
+            created_at=apt.created_at,
+            updated_at=apt.updated_at,
+            doctor_name=doc.name if doc else None,
+            patient_name=pat.name if pat else None,
+            specialization=doc.specialization if doc else None
+        )
