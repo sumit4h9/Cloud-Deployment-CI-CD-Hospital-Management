@@ -374,6 +374,28 @@ export default function App() {
     }
   };
 
+  const handlePrevDay = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() - 1);
+    setCurrentDate(d.toISOString().split('T')[0]);
+  };
+
+  const handleNextDay = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() + 1);
+    setCurrentDate(d.toISOString().split('T')[0]);
+  };
+
+  const formatDateDisplay = (dateStr: string) => {
+    try {
+      const [year, month, day] = dateStr.split('-');
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return `${day} ${months[parseInt(month) - 1]} ${year}`;
+    } catch {
+      return dateStr;
+    }
+  };
+
   // Metrics
   const todayAppointmentsCount = appointments.filter(a => a.status === 'Confirmed').length;
   const availableSlotsCount = slots.filter(s => s.is_available).length;
@@ -871,11 +893,11 @@ export default function App() {
                 <div className="schedule-header">
                   <h2 className="schedule-title">Today's Schedule</h2>
                   <div className="date-selector">
-                    <button className="nav-arrow-btn">
+                    <button className="nav-arrow-btn" onClick={handlePrevDay} title="Previous Day">
                       <ChevronLeft size={16} />
                     </button>
-                    <span>06 November 2026</span>
-                    <button className="nav-arrow-btn">
+                    <span>{formatDateDisplay(currentDate)}</span>
+                    <button className="nav-arrow-btn" onClick={handleNextDay} title="Next Day">
                       <ChevronRight size={16} />
                     </button>
                   </div>
@@ -987,11 +1009,11 @@ export default function App() {
               <div className="schedule-container">
                 <div className="schedule-header">
                   <div className="date-selector">
-                    <button className="nav-arrow-btn">
+                    <button className="nav-arrow-btn" onClick={handlePrevDay} title="Previous Day">
                       <ChevronLeft size={16} />
                     </button>
-                    <span>06 November 2026</span>
-                    <button className="nav-arrow-btn">
+                    <span>{formatDateDisplay(currentDate)}</span>
+                    <button className="nav-arrow-btn" onClick={handleNextDay} title="Next Day">
                       <ChevronRight size={16} />
                     </button>
                   </div>

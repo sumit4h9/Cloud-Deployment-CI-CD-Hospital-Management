@@ -65,13 +65,15 @@ def test_appointment_lifecycle():
         assert slot_1130["is_available"] is True
 
 def test_mark_appointment_completed():
-    # Book slot
+    import uuid
+    unique_date = f"2026-12-05"
+    slot_time = "14:00"
     create_payload = {
         "doctor_id": "doc_1",
-        "patient_id": "pat_1055",
-        "date": "2026-11-06",
-        "start_time": "15:00",
-        "end_time": "15:30"
+        "patient_id": f"pat_comp_{uuid.uuid4().hex[:4]}",
+        "date": f"2026-12-{uuid.uuid4().hex[:2]}",
+        "start_time": slot_time,
+        "end_time": "14:30"
     }
     create_res = client.post("/api/v1/appointments", json=create_payload)
     assert create_res.status_code == 201

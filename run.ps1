@@ -33,3 +33,4 @@ Write-Host "----------------------------------------------------------" -Foregro
 Write-Host "Press Ctrl+C to stop the server.`n" -ForegroundColor DarkGray
 
 uvicorn backend.app.main:app --port 8000
+
