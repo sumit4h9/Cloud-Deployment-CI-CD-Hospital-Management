@@ -40,25 +40,53 @@ A focused, production-grade appointment management platform designed strictly wi
 
 ## 🚀 Quick Start
 
-### 1. Run the Backend API
+### One-Command Launch (Tests + Build + Server)
 
+**Windows (PowerShell):**
 ```powershell
-# Run API server (auto-seeds database)
-uvicorn backend.app.main:app --reload --port 8000
+.\run.ps1
 ```
-- Interactive API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Health Check: [http://localhost:8000/health](http://localhost:8000/health)
-- Readiness Probe: [http://localhost:8000/ready](http://localhost:8000/ready)
 
-### 2. Run the Frontend UI
+**Linux / macOS:**
+```bash
+chmod +x run.sh
+./run.sh
+```
 
+This command automatically:
+1. Executes all 10 automated concurrency and API tests.
+2. Builds the clean production frontend bundle.
+3. Launches the unified server on `http://localhost:8000`.
+
+---
+
+## 🔐 Role-Specific Portals & Access
+
+| Portal | Intended User | Default Credential Preset | Capabilities |
+| :--- | :--- | :--- | :--- |
+| **Doctor Portal** | Physicians & Clinical Staff | `ananya.mehta@clinic.local` / `doc_1` | View daily schedule, 3 clean metrics, today's appointments list, reschedule/cancel modal, and dedicated availability slot management (`[Add Slot]`, `[Disable Slot]`). |
+| **Patient Portal** | Patients (Synthetic) | `Patient #1042` / `1042` | View personal upcoming appointment card, search specialists, and follow a 4-step slot reservation workflow. |
+
+---
+
+## 🌐 Endpoints & Web Access
+
+- **Web Application**: [http://localhost:8000](http://localhost:8000) (Portal gateway)
+- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check (Liveness)**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Readiness Probe**: [http://localhost:8000/ready](http://localhost:8000/ready)
+
+### Separate Dev Server (Optional)
+If running Vite with Hot Module Replacement (HMR) for frontend development:
 ```powershell
+# Terminal 1: Backend
+uvicorn backend.app.main:app --reload --port 8000
+
+# Terminal 2: Frontend
 cd frontend
-npm install
 npm run dev
 ```
-- Open browser at: [http://localhost:5173](http://localhost:5173)
-- Use the **Role Switcher** in the top header to toggle between **Doctor Portal** and **Patient Portal**.
+Open [http://localhost:5173](http://localhost:5173).
 
 ---
 

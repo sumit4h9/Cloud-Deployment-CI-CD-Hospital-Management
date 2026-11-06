@@ -111,3 +111,4 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
     else:
         raise HTTPException(status_code=400, detail="Invalid portal specified. Must be 'doctor' or 'patient'.")
+
