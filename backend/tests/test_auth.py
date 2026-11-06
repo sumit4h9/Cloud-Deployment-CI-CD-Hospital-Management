@@ -1,0 +1,16 @@
+import pytest
+from fastapi.testclient import TestClient
+from backend.app.main import app
+
+client = TestClient(app)
+
+def test_role_authorization_doctor_vs_patient():
+    # As doctor
+    doc_res = client.get("/api/v1/appointments?doctor_id=doc_1", headers={"Authorization": "Bearer doctor-ananya"})
+    assert doc_res.status_code == 200
+
+    # As patient
+    pat_res = client.get("/api/v1/appointments?patient_id=pat_1042", headers={"Authorization": "Bearer patient-1042"})
+    assert pat_res.status_code == 200
+    for apt in pat_res.json():
+        assert apt["patient_id"] == "pat_1042"
