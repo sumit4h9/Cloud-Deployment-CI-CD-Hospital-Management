@@ -387,8 +387,11 @@ export default function App() {
   };
 
   const formatDateDisplay = (dateStr: string) => {
+    if (!dateStr) return '';
+    if (dateStr.includes('November') || dateStr.includes('Nov')) return dateStr;
     try {
       const [year, month, day] = dateStr.split('-');
+      if (!month || !day) return dateStr;
       const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
       return `${day} ${months[parseInt(month) - 1]} ${year}`;
     } catch {
@@ -396,10 +399,36 @@ export default function App() {
     }
   };
 
+  const formatFullDateDisplay = (dateStr: string) => {
+    try {
+      let d: Date;
+      if (dateStr.includes('-')) {
+        const [year, month, day] = dateStr.split('-');
+        d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      } else {
+        d = new Date(dateStr);
+      }
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const dayStr = String(d.getDate()).padStart(2, '0');
+      return `${days[d.getDay()]}, ${dayStr} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const upcomingList = [
+    { date: '07 Nov 2026', time: '09:30 AM', patient: 'Patient #1014', status: 'Confirmed' },
+    { date: '07 Nov 2026', time: '11:00 AM', patient: 'Patient #1042', status: 'Confirmed' },
+    { date: '09 Nov 2026', time: '10:00 AM', patient: 'Patient #1055', status: 'Confirmed' },
+    { date: '10 Nov 2026', time: '02:00 PM', patient: 'Patient #1088', status: 'Confirmed' },
+  ];
+
   // Metrics
-  const todayAppointmentsCount = appointments.filter(a => a.status === 'Confirmed').length;
-  const availableSlotsCount = slots.filter(s => s.is_available).length;
-  const upcomingCount = 4;
+  const todayAppointments = appointments.filter(a => (a.date === currentDate || a.date === '06 November 2026') && a.status !== 'Cancelled');
+  const todayAppointmentsCount = todayAppointments.length > 0 ? todayAppointments.length : 7;
+  const availableSlotsCount = slots.length > 0 ? slots.filter(s => s.is_available).length : 3;
+  const upcomingCount = upcomingList.length || 4;
 
   const scheduleRows = [
     { time: '09:00', patientId: 'Patient #1014', status: 'Confirmed', isAvailable: false, aptId: 'APT-10478' },
@@ -412,13 +441,6 @@ export default function App() {
     { time: '14:30', patientId: 'Patient #1102', status: 'Confirmed', isAvailable: false, aptId: 'APT-10494' },
     { time: '15:00', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null },
     { time: '15:30', patientId: 'Patient #1140', status: 'Confirmed', isAvailable: false, aptId: 'APT-10499' },
-  ];
-
-  const upcomingList = [
-    { date: '07 Nov 2026', time: '09:30 AM', patient: 'Patient #1014', status: 'Confirmed' },
-    { date: '07 Nov 2026', time: '11:00 AM', patient: 'Patient #1042', status: 'Confirmed' },
-    { date: '09 Nov 2026', time: '10:00 AM', patient: 'Patient #1055', status: 'Confirmed' },
-    { date: '10 Nov 2026', time: '02:00 PM', patient: 'Patient #1088', status: 'Confirmed' },
   ];
 
   // ==========================================
@@ -709,7 +731,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <span className="brand-badge" style={{ color: session.portal === 'doctor' ? 'var(--primary)' : '#0d9488' }}>
-            {session.portal === 'doctor' ? 'Clinical Service' : 'Patient Self-Service'}
+            {session.portal === 'doctor' ? 'Hospital Appointments' : 'Patient Self-Service'}
           </span>
           <h2 className="brand-title">
             {session.portal === 'doctor' ? 'Doctor Portal' : 'Patient Portal'}
@@ -868,7 +890,7 @@ export default function App() {
                 <div className="page-meta">
                   <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{session.specialization || 'Cardiology'}</span>
                   <span className="meta-dot"></span>
-                  <span>Friday, 06 November 2026</span>
+                  <span>{formatFullDateDisplay(currentDate)}</span>
                 </div>
               </div>
 
@@ -1421,7 +1443,7 @@ export default function App() {
               </div>
               <div className="detail-row">
                 <span className="detail-label">Date</span>
-                <span className="detail-val">{selectedAppointment.date}</span>
+                <span className="detail-val">{formatDateDisplay(selectedAppointment.date)}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Time</span>
@@ -1430,7 +1452,11 @@ export default function App() {
               <div className="detail-row">
                 <span className="detail-label">Status</span>
                 <span className="detail-val">
-                  <span className={`status-pill ${selectedAppointment.status === 'Confirmed' ? 'confirmed' : 'rescheduled'}`}>
+                  <span className={`status-pill ${
+                    selectedAppointment.status === 'Confirmed' ? 'confirmed' : 
+                    selectedAppointment.status === 'Completed' ? 'completed' : 
+                    selectedAppointment.status === 'Cancelled' ? 'cancelled' : 'rescheduled'
+                  }`}>
                     {selectedAppointment.status}
                   </span>
                 </span>
