@@ -91,7 +91,14 @@ export default function App() {
 
   // Active navigation tab within authenticated portal
   const [activeTab, setActiveTab] = useState<string>('Overview');
-  const [currentDate, setCurrentDate] = useState<string>('2026-11-06');
+  const getTodayDateStr = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const [currentDate, setCurrentDate] = useState<string>(getTodayDateStr);
   
   // Data states
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -193,13 +200,22 @@ export default function App() {
         setDoctors(docData);
       }
 
-      const slotRes = await fetch(`${API_BASE}/api/v1/doctors/doc_1/slots?date=${currentDate}`);
+      const activeDocId = session?.portal === 'doctor'
+        ? session.id
+        : session?.portal === 'admin'
+          ? adminSelectedDoctorId
+          : selectedDoctorId;
+
+      const slotRes = await fetch(`${API_BASE}/api/v1/doctors/${activeDocId}/slots?date=${currentDate}`);
       if (slotRes.ok) {
         const slotData = await slotRes.json();
         setSlots(slotData);
       }
 
-      const aptRes = await fetch(`${API_BASE}/api/v1/appointments?date=${currentDate}`);
+      const aptUrl = session?.portal === 'doctor'
+        ? `${API_BASE}/api/v1/appointments?doctor_id=${session.id}&date=${currentDate}`
+        : `${API_BASE}/api/v1/appointments?date=${currentDate}`;
+      const aptRes = await fetch(aptUrl);
       if (aptRes.ok) {
         const aptData = await aptRes.json();
         setAppointments(aptData);
@@ -280,7 +296,7 @@ export default function App() {
     if (session) {
       fetchData();
     }
-  }, [currentDate, session]);
+  }, [currentDate, session, selectedDoctorId, adminSelectedDoctorId]);
 
   // Appointment Actions
   const handleCancelAppointment = async (aptId: string) => {
@@ -435,15 +451,23 @@ export default function App() {
   };
 
   const handlePrevDay = () => {
-    const d = new Date(currentDate);
-    d.setDate(d.getDate() - 1);
-    setCurrentDate(d.toISOString().split('T')[0]);
+    const [y, m, d] = currentDate.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() - 1);
+    const ny = dateObj.getFullYear();
+    const nm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const nd = String(dateObj.getDate()).padStart(2, '0');
+    setCurrentDate(`${ny}-${nm}-${nd}`);
   };
 
   const handleNextDay = () => {
-    const d = new Date(currentDate);
-    d.setDate(d.getDate() + 1);
-    setCurrentDate(d.toISOString().split('T')[0]);
+    const [y, m, d] = currentDate.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() + 1);
+    const ny = dateObj.getFullYear();
+    const nm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const nd = String(dateObj.getDate()).padStart(2, '0');
+    setCurrentDate(`${ny}-${nm}-${nd}`);
   };
 
   const formatDateDisplay = (dateStr: string) => {
@@ -485,23 +509,36 @@ export default function App() {
   ];
 
   // Metrics
-  const todayAppointments = appointments.filter(a => (a.date === currentDate || a.date === '06 November 2026') && a.status !== 'Cancelled');
-  const todayAppointmentsCount = todayAppointments.length > 0 ? todayAppointments.length : 7;
-  const availableSlotsCount = slots.length > 0 ? slots.filter(s => s.is_available).length : 3;
+  const todayAppointments = appointments.filter(a => a.date === currentDate && a.status !== 'Cancelled');
+  const todayAppointmentsCount = todayAppointments.length;
+  const availableSlotsCount = slots.filter(s => s.is_available).length;
   const upcomingCount = upcomingList.length || 4;
 
   const scheduleRows = [
-    { time: '09:00', patientId: 'Patient #1014', status: 'Confirmed', isAvailable: false, aptId: 'APT-10478' },
-    { time: '09:30', patientId: 'Patient #1029', status: 'Confirmed', isAvailable: false, aptId: 'APT-10480' },
-    { time: '10:00', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null },
-    { time: '10:30', patientId: 'Patient #1042', status: 'Confirmed', isAvailable: false, aptId: 'APT-10482' },
-    { time: '11:00', patientId: 'Patient #1055', status: 'Confirmed', isAvailable: false, aptId: 'APT-10485' },
-    { time: '11:30', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null },
-    { time: '14:00', patientId: 'Patient #1088', status: 'Confirmed', isAvailable: false, aptId: 'APT-10491' },
-    { time: '14:30', patientId: 'Patient #1102', status: 'Confirmed', isAvailable: false, aptId: 'APT-10494' },
-    { time: '15:00', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null },
-    { time: '15:30', patientId: 'Patient #1140', status: 'Confirmed', isAvailable: false, aptId: 'APT-10499' },
+    { time: '09:00', patientId: 'Patient #1014', status: 'Confirmed', isAvailable: false, aptId: 'APT-10478', patientIdRaw: 'pat_1014', slotId: 's1' },
+    { time: '09:30', patientId: 'Patient #1029', status: 'Confirmed', isAvailable: false, aptId: 'APT-10480', patientIdRaw: 'pat_1029', slotId: 's2' },
+    { time: '10:00', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null, patientIdRaw: null, slotId: 's3' },
+    { time: '10:30', patientId: 'Patient #1042', status: 'Confirmed', isAvailable: false, aptId: 'APT-10482', patientIdRaw: 'pat_1042', slotId: 's4' },
+    { time: '11:00', patientId: 'Patient #1055', status: 'Confirmed', isAvailable: false, aptId: 'APT-10485', patientIdRaw: 'pat_1055', slotId: 's5' },
+    { time: '11:30', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null, patientIdRaw: null, slotId: 's6' },
+    { time: '14:00', patientId: 'Patient #1088', status: 'Confirmed', isAvailable: false, aptId: 'APT-10491', patientIdRaw: 'pat_1088', slotId: 's7' },
+    { time: '14:30', patientId: 'Patient #1102', status: 'Confirmed', isAvailable: false, aptId: 'APT-10494', patientIdRaw: 'pat_1102', slotId: 's8' },
+    { time: '15:00', patientId: 'Available', status: 'Bookable', isAvailable: true, aptId: null, patientIdRaw: null, slotId: 's9' },
+    { time: '15:30', patientId: 'Patient #1140', status: 'Confirmed', isAvailable: false, aptId: 'APT-10499', patientIdRaw: 'pat_1140', slotId: 's10' },
   ];
+
+  const activeScheduleRows = slots.length > 0 ? slots.map(s => {
+    const apt = appointments.find(a => (a.slot_id === s.id || a.start_time === s.start_time) && a.status !== 'Cancelled');
+    return {
+      time: s.start_time,
+      patientId: apt ? (apt.patient_name || `Patient #${apt.patient_id.replace('pat_', '')}`) : 'Available',
+      status: apt ? apt.status : (s.is_available ? 'Bookable' : 'Unavailable'),
+      isAvailable: s.is_available && !apt,
+      aptId: apt ? apt.id : null,
+      patientIdRaw: apt ? apt.patient_id : null,
+      slotId: s.id
+    };
+  }) : scheduleRows;
 
   // ==========================================
   // UNATHENTICATED STATE: SEPARATE PORTALS & LOGIN
@@ -1127,11 +1164,11 @@ export default function App() {
               {/* Three clean summary metrics */}
               <div className="metrics-row">
                 <div className="metric-card">
-                  <div className="metric-val">{todayAppointmentsCount || 7}</div>
+                  <div className="metric-val">{todayAppointmentsCount}</div>
                   <div className="metric-label">Today's appointments</div>
                 </div>
                 <div className="metric-card">
-                  <div className="metric-val">{availableSlotsCount || 3}</div>
+                  <div className="metric-val">{availableSlotsCount}</div>
                   <div className="metric-label">Available slots</div>
                 </div>
                 <div className="metric-card">
@@ -1156,7 +1193,7 @@ export default function App() {
                 </div>
 
                 <div className="schedule-list">
-                  {scheduleRows.map((row, idx) => {
+                  {activeScheduleRows.map((row, idx) => {
                     const dynamicApt = appointments.find(a => a.id === row.aptId);
                     const currentStatus = dynamicApt ? dynamicApt.status : row.status;
                     const isCompleted = currentStatus === 'Completed';
@@ -1180,10 +1217,10 @@ export default function App() {
                                 onClick={() => setSelectedAppointment({
                                   id: row.aptId || 'APT-10482',
                                   doctor_id: session.id,
-                                  patient_id: row.patientId.replace('Patient #', 'pat_'),
-                                  date: '06 November 2026',
-                                  start_time: `${row.time} AM`,
-                                  end_time: '11:00 AM',
+                                  patient_id: row.patientIdRaw || (row.patientId ? row.patientId.replace('Patient #', 'pat_') : 'pat_1042'),
+                                  date: currentDate,
+                                  start_time: `${row.time}`,
+                                  end_time: '11:00',
                                   status: currentStatus,
                                   patient_name: row.patientId
                                 })}
@@ -1386,60 +1423,65 @@ export default function App() {
               </div>
 
               {/* Primary Focus: Upcoming Appointment Card */}
-              <div className="section-card" style={{ borderLeft: '4px solid #0d9488' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Upcoming Appointment
-                  </span>
-                  <span className="status-pill confirmed">Confirmed</span>
-                </div>
+              {(() => {
+                const activePatientApt = appointments.find(a => (a.patient_id === session.id || a.patient_id === `pat_${session.id}`) && a.status !== 'Cancelled') || appointments[0];
+                return (
+                  <div className="section-card" style={{ borderLeft: '4px solid #0d9488' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Upcoming Appointment
+                      </span>
+                      <span className={`status-pill ${activePatientApt?.status.toLowerCase() || 'confirmed'}`}>{activePatientApt?.status || 'Confirmed'}</span>
+                    </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '18px' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Doctor</div>
-                    <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>Dr. Ananya Mehta</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Specialization</div>
-                    <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>Cardiology</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Date</div>
-                    <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>06 November 2026</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Time</div>
-                    <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>10:30 AM</div>
-                  </div>
-                </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '18px' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Doctor</div>
+                        <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>{activePatientApt?.doctor_name || 'Dr. Ananya Mehta'}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Specialization</div>
+                        <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>{activePatientApt?.specialization || 'Cardiology'}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Date</div>
+                        <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>{activePatientApt ? formatDateDisplay(activePatientApt.date) : formatDateDisplay(currentDate)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Time</div>
+                        <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>{activePatientApt?.start_time || '10:30 AM'}</div>
+                      </div>
+                    </div>
 
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button 
-                    className="btn-secondary"
-                    onClick={() => {
-                      setSelectedAppointment({
-                        id: 'APT-10482',
-                        doctor_id: 'doc_1',
-                        patient_id: session.id,
-                        date: '2026-11-06',
-                        start_time: '10:30',
-                        end_time: '11:00',
-                        status: 'Confirmed',
-                        doctor_name: 'Dr. Ananya Mehta'
-                      });
-                      setShowRescheduleModal(true);
-                    }}
-                  >
-                    Reschedule
-                  </button>
-                  <button 
-                    className="btn-danger-outline"
-                    onClick={() => handleCancelAppointment('APT-10482')}
-                  >
-                    Cancel Appointment
-                  </button>
-                </div>
-              </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button 
+                        className="btn-secondary"
+                        onClick={() => {
+                          setSelectedAppointment(activePatientApt || {
+                            id: 'APT-10482',
+                            doctor_id: 'doc_1',
+                            patient_id: session.id,
+                            date: currentDate,
+                            start_time: '10:30',
+                            end_time: '11:00',
+                            status: 'Confirmed',
+                            doctor_name: 'Dr. Ananya Mehta'
+                          });
+                          setShowRescheduleModal(true);
+                        }}
+                      >
+                        Reschedule
+                      </button>
+                      <button 
+                        className="btn-danger-outline"
+                        onClick={() => handleCancelAppointment(activePatientApt?.id || 'APT-10482')}
+                      >
+                        Cancel Appointment
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Recent Appointments */}
               <div className="section-card">
@@ -1552,7 +1594,7 @@ export default function App() {
               {/* Step 2 & 3: Select Date & Available Slot */}
               <div className="section-card">
                 <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px', color: 'var(--text-secondary)' }}>
-                  2. AVAILABLE SLOTS FOR {currentDate}
+                  2. AVAILABLE SLOTS FOR {formatDateDisplay(currentDate)}
                 </h3>
                 
                 <div className="slot-chips-grid">
@@ -1566,6 +1608,11 @@ export default function App() {
                       {slot.start_time} {slot.is_available ? '• Available' : '• Booked'}
                     </button>
                   ))}
+                  {slots.length === 0 && (
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                      No slots available for this date.
+                    </span>
+                  )}
                 </div>
 
                 {/* Step 4: Confirmation panel */}
@@ -1609,22 +1656,34 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td style={{ fontWeight: 600, color: '#0d9488' }}>#APT-10482</td>
-                    <td>Dr. Ananya Mehta (Cardiology)</td>
-                    <td>06 November 2026</td>
-                    <td>10:30 AM</td>
-                    <td><span className="status-pill confirmed">Confirmed</span></td>
-                    <td>
-                      <button 
-                        className="btn-danger-outline" 
-                        style={{ fontSize: '11px', padding: '4px 8px' }}
-                        onClick={() => handleCancelAppointment('APT-10482')}
-                      >
-                        Cancel
-                      </button>
-                    </td>
-                  </tr>
+                  {appointments.length > 0 ? (
+                    appointments.map(apt => (
+                      <tr key={apt.id}>
+                        <td style={{ fontWeight: 600, color: '#0d9488' }}>#{apt.id}</td>
+                        <td>{apt.doctor_name || 'Dr. Ananya Mehta'} ({apt.specialization || 'Cardiology'})</td>
+                        <td>{formatDateDisplay(apt.date)}</td>
+                        <td>{apt.start_time}</td>
+                        <td><span className={`status-pill ${apt.status.toLowerCase()}`}>{apt.status}</span></td>
+                        <td>
+                          {apt.status !== 'Cancelled' && (
+                            <button 
+                              className="btn-danger-outline" 
+                              style={{ fontSize: '11px', padding: '4px 8px' }}
+                              onClick={() => handleCancelAppointment(apt.id)}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                        No appointments found for {formatDateDisplay(currentDate)}.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

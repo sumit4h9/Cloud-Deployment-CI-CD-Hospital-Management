@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -17,13 +18,21 @@ def list_doctors(
         query = query.filter(Doctor.specialization.ilike(f"%{specialization}%"))
     doctors = query.all()
 
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     result = []
     for doc in doctors:
-        # Find next available slot
+        # Find next available slot (prefer upcoming/today, fallback to any available)
         next_slot = db.query(Slot).filter(
             Slot.doctor_id == doc.id,
-            Slot.is_available == True
+            Slot.is_available == True,
+            Slot.date >= today_str
         ).order_by(Slot.date.asc(), Slot.start_time.asc()).first()
+
+        if not next_slot:
+            next_slot = db.query(Slot).filter(
+                Slot.doctor_id == doc.id,
+                Slot.is_available == True
+            ).order_by(Slot.date.asc(), Slot.start_time.asc()).first()
 
         doc_out = DoctorOut(
             id=doc.id,
@@ -41,10 +50,19 @@ def get_doctor(doctor_id: str, db: Session = Depends(get_db)):
     doc = db.query(Doctor).filter(Doctor.id == doctor_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Doctor not found")
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     next_slot = db.query(Slot).filter(
         Slot.doctor_id == doc.id,
-        Slot.is_available == True
+        Slot.is_available == True,
+        Slot.date >= today_str
     ).order_by(Slot.date.asc(), Slot.start_time.asc()).first()
+
+    if not next_slot:
+        next_slot = db.query(Slot).filter(
+            Slot.doctor_id == doc.id,
+            Slot.is_available == True
+        ).order_by(Slot.date.asc(), Slot.start_time.asc()).first()
 
     return DoctorOut(
         id=doc.id,
@@ -69,6 +87,41 @@ def get_doctor_slots(
     if date:
         query = query.filter(Slot.date == date)
     slots = query.order_by(Slot.start_time.asc()).all()
+
+    # If a specific date was queried and no slots exist yet for this doctor,
+    # auto-populate standard clinic working slots (09:00 - 16:00)
+    if date and not slots:
+        default_times = [
+            ("09:00", "09:30"),
+            ("09:30", "10:00"),
+            ("10:00", "10:30"),
+            ("10:30", "11:00"),
+            ("11:00", "11:30"),
+            ("11:30", "12:00"),
+            ("14:00", "14:30"),
+            ("14:30", "15:00"),
+            ("15:00", "15:30"),
+            ("15:30", "16:00"),
+        ]
+        new_slots = []
+        for start_t, end_t in default_times:
+            s = Slot(
+                doctor_id=doctor_id,
+                date=date,
+                start_time=start_t,
+                end_time=end_t,
+                is_available=True
+            )
+            db.add(s)
+            new_slots.append(s)
+        try:
+            db.commit()
+            for s in new_slots:
+                db.refresh(s)
+            slots = new_slots
+        except Exception:
+            db.rollback()
+            slots = db.query(Slot).filter(Slot.doctor_id == doctor_id, Slot.date == date).order_by(Slot.start_time.asc()).all()
 
     result = []
     for slot in slots:
