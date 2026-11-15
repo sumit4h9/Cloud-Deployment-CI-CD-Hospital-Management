@@ -1,0 +1,11 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501", # Line length handled by formatter
+    "E712", # SQLAlchemy boolean column comparison (e.g., Slot.is_available == True)
+    "W291", # Trailing whitespace
+    "W293", # Blank line whitespace
+]

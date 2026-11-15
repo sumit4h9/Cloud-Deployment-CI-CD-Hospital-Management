@@ -37,7 +37,7 @@ spec:
     spec:
       containers:
         - name: backend-api
-          image: ghcr.io/suraj/doctor-appointment-backend:1.0.0
+          image: ghcr.io/sumit4h9/hospital-backend:v1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

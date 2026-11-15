@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: background-worker
-          image: ghcr.io/suraj/doctor-appointment-backend:1.0.0
+          image: ghcr.io/sumit4h9/hospital-worker:v1.0.0
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "backend.app.worker"]
           env:

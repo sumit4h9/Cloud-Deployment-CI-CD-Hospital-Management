@@ -24,7 +24,9 @@ run: build
 	uvicorn backend.app.main:app --port 8000 --reload
 
 docker-build:
-	docker build -t doctor-appointment-api .
+	docker build -t ghcr.io/sumit4h9/hospital-backend:v1.0.0 ./backend
+	docker build -f ./backend/Dockerfile.worker -t ghcr.io/sumit4h9/hospital-worker:v1.0.0 ./backend
+	docker build -t ghcr.io/sumit4h9/hospital-frontend:v1.0.0 ./frontend
 
 docker-up:
 	docker compose up --build

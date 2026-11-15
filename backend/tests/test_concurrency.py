@@ -1,5 +1,4 @@
 import uuid
-import sys
 import argparse
 import concurrent.futures
 from fastapi.testclient import TestClient

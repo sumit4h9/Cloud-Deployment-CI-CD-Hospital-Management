@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: frontend-nginx
-          image: ghcr.io/suraj/doctor-appointment-frontend:1.0.0
+          image: ghcr.io/sumit4h9/hospital-frontend:v1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

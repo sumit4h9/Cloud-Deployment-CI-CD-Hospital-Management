@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
 
@@ -66,7 +65,6 @@ def test_appointment_lifecycle():
 
 def test_mark_appointment_completed():
     import uuid
-    unique_date = f"2026-12-05"
     slot_time = "14:00"
     create_payload = {
         "doctor_id": "doc_1",

@@ -1,9 +1,7 @@
-import threading
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 

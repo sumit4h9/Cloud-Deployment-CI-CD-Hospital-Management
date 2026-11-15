@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
 from ..database import get_db
 from ..models import Slot, Doctor, AuditEvent
 from ..schemas import SlotCreate, SlotOut
-from ..auth import require_role, CurrentUser, get_current_user
+from ..auth import CurrentUser, get_current_user
 import json
 
 router = APIRouter(prefix="/api/v1/slots", tags=["Slots & Availability"])

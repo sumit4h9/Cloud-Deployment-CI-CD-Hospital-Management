@@ -19,6 +19,8 @@ COPY backend /app/backend
 RUN useradd -u 10001 -m appuser && chown -R appuser:appuser /app
 USER appuser
 
+ENV PYTHONPATH=/app
+
 # Expose port
 EXPOSE 8000
 
