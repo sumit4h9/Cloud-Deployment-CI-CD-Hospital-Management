@@ -3,13 +3,13 @@ name: Build, Test, Security & GHCR Publish
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
+    tags: [ 'v*.*.*', 'v*' ]
   pull_request:
     branches: [ main ]
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -178,10 +178,32 @@ jobs:
     name: Deploy & Verify AKS Workloads
     runs-on: ubuntu-latest
     needs: publish-ghcr
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Configure Release Images in Kustomize
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "Overriding Kustomize deployment images with release version: ${VERSION}"
+          {
+            echo ""
+            echo "images:"
+            echo "  - name: ghcr.io/sumit4h9/hospital-backend"
+            echo "    newName: ghcr.io/${OWNER}/hospital-backend"
+            echo "    newTag: ${VERSION}"
+            echo "  - name: ghcr.io/sumit4h9/hospital-frontend"
+            echo "    newName: ghcr.io/${OWNER}/hospital-frontend"
+            echo "    newTag: ${VERSION}"
+            echo "  - name: ghcr.io/sumit4h9/hospital-worker"
+            echo "    newName: ghcr.io/${OWNER}/hospital-worker"
+            echo "    newTag: ${VERSION}"
+          } >> k8s/kustomization.yaml
+          echo "--- Rendered Kustomize Release Manifests ---"
+          kubectl kustomize k8s/ | grep -E "image: ghcr.io"
 
       - name: Log in to Azure (OIDC)
         uses: azure/login@v2
@@ -216,4 +238,15 @@ jobs:
         run: |
           kubectl get pods -n healthcare
           kubectl get deployments -n healthcare
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            --verify-tag || echo "GitHub Release already exists or creation skipped."
+
 
