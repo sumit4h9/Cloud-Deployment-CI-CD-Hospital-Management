@@ -47,7 +47,9 @@ services:
       retries: 3
       start_period: 10s
     networks:
-      - clinic-network
+      clinic-network:
+        aliases:
+          - backend-service
 
   # ==========================================================
   # 3. BACKGROUND JOB CONTAINER: Scheduled Operational Worker
