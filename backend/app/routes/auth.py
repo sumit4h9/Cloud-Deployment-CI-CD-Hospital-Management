@@ -40,11 +40,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         ).first()
 
         if not doctor:
-            # Fallback to primary doctor if demo input is entered
-            doctor = db.query(Doctor).filter(Doctor.id == "doc_1").first()
-
-        if not doctor:
-            raise HTTPException(status_code=401, detail="Doctor account not found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials. Doctor account not found."
+            )
 
         audit = AuditEvent(
             event_type="PORTAL_LOGIN",
@@ -109,6 +108,27 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             )
         )
 
+    elif portal == "admin":
+        audit = AuditEvent(
+            event_type="PORTAL_LOGIN",
+            actor_role="admin",
+            actor_id="admin_1",
+            details=json.dumps({"portal": "admin_portal", "admin_name": "Clinic Administrator"})
+        )
+        db.add(audit)
+        db.commit()
+
+        return LoginResponse(
+            access_token="admin-admin_1-token",
+            role="admin",
+            user=UserInfo(
+                id="admin_1",
+                name="Clinic Administrator",
+                email="admin@clinic.local",
+                role="admin"
+            )
+        )
+
     else:
-        raise HTTPException(status_code=400, detail="Invalid portal specified. Must be 'doctor' or 'patient'.")
+        raise HTTPException(status_code=400, detail="Invalid portal specified. Must be 'doctor', 'patient', or 'admin'.")
 

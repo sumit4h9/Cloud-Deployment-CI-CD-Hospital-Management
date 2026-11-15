@@ -8,6 +8,7 @@ help:
 	@echo "  make run           Run server locally at http://localhost:8000"
 	@echo "  make docker-build  Build Docker image"
 	@echo "  make docker-up     Start services via Docker Compose"
+	@echo "  make scan          Run Trivy security scan on containers"
 
 install:
 	pip install -r backend/requirements.txt
@@ -27,4 +28,8 @@ docker-build:
 
 docker-up:
 	docker compose up --build
+
+scan:
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(PWD):/root/.cache/ aquasec/trivy:latest fs --severity CRITICAL,HIGH .
+
 

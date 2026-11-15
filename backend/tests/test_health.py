@@ -18,3 +18,9 @@ def test_readiness_endpoint():
     assert data["status"] == "ready"
     assert data["database"] == "connected"
 
+def test_metrics_endpoint():
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    text = response.text
+    assert "appointments_created_total" in text
+    assert "concurrency_conflicts_prevented_total" in text

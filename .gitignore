@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments & Secrets
+.env
+.env.local
+*.pem
+*.key
+*.cert
+*.crt
+
+# Local Databases & Backups
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.dump
+backups/
+
+# Node & Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+frontend/dist-ssr/
+*.local
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

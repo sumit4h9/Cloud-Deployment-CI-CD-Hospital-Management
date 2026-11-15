@@ -1,21 +1,146 @@
-version: '3.8'
-
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: doctor-appointment-api
-    ports:
-      - "8000:8000"
+  # ==========================================================
+  # 1. DATABASE CONTAINER: PostgreSQL 16
+  # ==========================================================
+  database:
+    image: postgres:16-alpine
+    container_name: appointment-database
+    restart: unless-stopped
     environment:
-      - DATABASE_URL=sqlite:///./appointments.db
+      POSTGRES_DB: appointments_db
+      POSTGRES_USER: clinic_admin
+      POSTGRES_PASSWORD: clinic_secure_pass_2026
+    ports:
+      - "5432:5432"
     volumes:
-      - ./data:/app/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "pg_isready -U clinic_admin -d appointments_db"]
       interval: 10s
       timeout: 5s
-      retries: 3
-    restart: unless-stopped
+      retries: 5
+    networks:
+      - clinic-network
 
+  # ==========================================================
+  # 2. BACKEND CONTAINER: FastAPI Application Service
+  # ==========================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: appointment-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://clinic_admin:clinic_secure_pass_2026@database:5432/appointments_db
+      - JWT_SECRET=clinic_super_secret_key_2026_rbac
+      - PORT=8000
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - clinic-network
+
+  # ==========================================================
+  # 3. BACKGROUND JOB CONTAINER: Scheduled Operational Worker
+  # ==========================================================
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: appointment-worker
+    restart: unless-stopped
+    command: ["python", "-m", "backend.app.worker"]
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://clinic_admin:clinic_secure_pass_2026@database:5432/appointments_db
+    depends_on:
+      database:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - clinic-network
+
+  # ==========================================================
+  # 4. FRONTEND CONTAINER: Nginx Reverse Proxy & React SPA
+  # ==========================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: appointment-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - clinic-network
+
+  # ==========================================================
+  # 5. MONITORING CONTAINER: Prometheus Telemetry Scraper
+  # ==========================================================
+  monitoring:
+    image: prom/prometheus:v2.51.0
+    container_name: appointment-monitoring
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - clinic-network
+
+  # ==========================================================
+  # 6. OBSERVABILITY DASHBOARD: Grafana
+  # ==========================================================
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: appointment-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - monitoring
+    networks:
+      - clinic-network
+
+# ============================================================
+# PERSISTENT STORAGE VOLUMES & ISOLATED NETWORK
+# ============================================================
+volumes:
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  clinic-network:
+    driver: bridge

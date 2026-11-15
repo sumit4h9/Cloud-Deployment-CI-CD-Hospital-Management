@@ -1,10 +1,24 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from .database import engine, SessionLocal, Base
 from .models import Doctor, Patient, Slot, Appointment, AuditEvent
 
 def seed_database():
     Base.metadata.create_all(bind=engine)
+
+    # Enforce database-level partial unique index for multi-replica concurrency protection
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_active_appointment 
+                ON appointments (doctor_id, date, start_time) 
+                WHERE status IN ('Confirmed', 'Rescheduled');
+            """))
+            conn.commit()
+        except Exception:
+            pass
+
     db: Session = SessionLocal()
 
     # If already seeded, skip

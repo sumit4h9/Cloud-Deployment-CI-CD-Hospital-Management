@@ -4,17 +4,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from ..database import get_db
 from ..models import Appointment, Slot, Doctor, Patient, AuditEvent
 from ..schemas import AppointmentCreate, AppointmentReschedule, AppointmentOut
 from ..auth import get_current_user, CurrentUser
+from ..metrics import APPOINTMENTS_CREATED, APPOINTMENTS_COMPLETED, APPOINTMENTS_CANCELLED, CONFLICTS_PREVENTED
 
 router = APIRouter(prefix="/api/v1/appointments", tags=["Appointments"])
 
-# Global concurrency lock to guarantee atomic slot reservation across concurrent threads
-_booking_lock = threading.Lock()
+# (Note: In-memory locks eliminated in favor of database-level partial unique index
+# and atomic conditional updates for multi-replica Kubernetes horizontal autoscaling)
 
 def record_audit(db: Session, event_type: str, actor_role: str, actor_id: str, details: dict):
     audit = AuditEvent(
@@ -148,54 +150,33 @@ def create_appointment(
         db.commit()
         db.refresh(patient)
 
-    # 2. Acquire concurrency lock for critical section to avoid race conditions
-    with _booking_lock:
-        # Check if an existing confirmed or active appointment conflicts with this time window
-        conflict = db.query(Appointment).filter(
-            Appointment.doctor_id == payload.doctor_id,
-            Appointment.date == payload.date,
-            Appointment.start_time == payload.start_time,
-            Appointment.status.in_(["Confirmed", "Rescheduled"])
+    # 2. Database-level atomic slot claim
+    slot = None
+    if payload.slot_id:
+        slot = db.query(Slot).filter(Slot.id == payload.slot_id).first()
+    else:
+        slot = db.query(Slot).filter(
+            Slot.doctor_id == payload.doctor_id,
+            Slot.date == payload.date,
+            Slot.start_time == payload.start_time
         ).first()
 
-        if conflict:
+    if slot:
+        # Atomic conditional update guaranteed across distributed replica pods
+        updated_rows = db.query(Slot).filter(
+            Slot.id == slot.id,
+            Slot.is_available == True
+        ).update({"is_available": False})
+
+        if updated_rows == 0:
+            CONFLICTS_PREVENTED.inc()
             record_audit(
                 db,
                 event_type="CONFLICT_PREVENTED",
                 actor_role=current_user.role,
                 actor_id=current_user.id,
                 details={
-                    "reason": "Doctor already booked for slot",
-                    "doctor_id": payload.doctor_id,
-                    "date": payload.date,
-                    "start_time": payload.start_time,
-                    "conflicting_appointment_id": conflict.id
-                }
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Time slot {payload.start_time} on {payload.date} is already booked for this doctor."
-            )
-
-        # Slot resolution
-        slot = None
-        if payload.slot_id:
-            slot = db.query(Slot).filter(Slot.id == payload.slot_id).first()
-        else:
-            slot = db.query(Slot).filter(
-                Slot.doctor_id == payload.doctor_id,
-                Slot.date == payload.date,
-                Slot.start_time == payload.start_time
-            ).first()
-
-        if slot and not slot.is_available:
-            record_audit(
-                db,
-                event_type="CONFLICT_PREVENTED",
-                actor_role=current_user.role,
-                actor_id=current_user.id,
-                details={
-                    "reason": "Slot is marked unavailable",
+                    "reason": "Slot claimed by concurrent transaction",
                     "slot_id": slot.id,
                     "doctor_id": payload.doctor_id
                 }
@@ -205,44 +186,68 @@ def create_appointment(
                 detail="Selected appointment slot is no longer available"
             )
 
-        # Mark slot unavailable if slot exists
-        if slot:
-            slot.is_available = False
-            db.add(slot)
+    # 3. Create appointment record and enforce partial unique index constraint in DB
+    new_apt = Appointment(
+        doctor_id=payload.doctor_id,
+        patient_id=payload.patient_id,
+        slot_id=slot.id if slot else None,
+        date=payload.date,
+        start_time=payload.start_time,
+        end_time=end_time,
+        status="Confirmed"
+    )
+    db.add(new_apt)
 
-        # Create appointment record
-        new_apt = Appointment(
-            doctor_id=payload.doctor_id,
-            patient_id=payload.patient_id,
-            slot_id=slot.id if slot else None,
-            date=payload.date,
-            start_time=payload.start_time,
-            end_time=end_time,
-            status="Confirmed"
-        )
-        db.add(new_apt)
+    try:
         db.commit()
         db.refresh(new_apt)
+    except IntegrityError as exc:
+        db.rollback()
+        # Release the slot back to available if it was reserved
+        if slot:
+            db.query(Slot).filter(Slot.id == slot.id).update({"is_available": True})
+            db.commit()
 
+        CONFLICTS_PREVENTED.inc()
         record_audit(
             db,
-            event_type="APPOINTMENT_CREATED",
+            event_type="CONFLICT_PREVENTED",
             actor_role=current_user.role,
             actor_id=current_user.id,
             details={
-                "appointment_id": new_apt.id,
-                "doctor_id": new_apt.doctor_id,
-                "patient_id": new_apt.patient_id,
-                "date": new_apt.date,
-                "time": new_apt.start_time
+                "reason": "Database partial unique index prevented race condition",
+                "doctor_id": payload.doctor_id,
+                "date": payload.date,
+                "start_time": payload.start_time,
+                "error": str(exc.orig) if hasattr(exc, "orig") else str(exc)
             }
         )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Time slot {payload.start_time} on {payload.date} is already booked for this doctor."
+        )
 
-        return AppointmentOut(
-            id=new_apt.id,
-            doctor_id=new_apt.doctor_id,
-            patient_id=new_apt.patient_id,
-            slot_id=new_apt.slot_id,
+    APPOINTMENTS_CREATED.inc()
+
+    record_audit(
+        db,
+        event_type="APPOINTMENT_CREATED",
+        actor_role=current_user.role,
+        actor_id=current_user.id,
+        details={
+            "appointment_id": new_apt.id,
+            "doctor_id": new_apt.doctor_id,
+            "patient_id": new_apt.patient_id,
+            "date": new_apt.date,
+            "time": new_apt.start_time
+        }
+    )
+
+    return AppointmentOut(
+        id=new_apt.id,
+        doctor_id=new_apt.doctor_id,
+        patient_id=new_apt.patient_id,
+        slot_id=new_apt.slot_id,
             date=new_apt.date,
             start_time=new_apt.start_time,
             end_time=new_apt.end_time,
@@ -261,100 +266,106 @@ def reschedule_appointment(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    with _booking_lock:
-        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-        if not apt:
-            raise HTTPException(status_code=404, detail="Appointment not found")
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if apt.status == "Cancelled":
-            raise HTTPException(status_code=400, detail="Cannot reschedule a cancelled appointment")
+    if apt.status == "Cancelled":
+        raise HTTPException(status_code=400, detail="Cannot reschedule a cancelled appointment")
 
-        # Check conflict at new time
-        conflict = db.query(Appointment).filter(
-            Appointment.doctor_id == apt.doctor_id,
-            Appointment.date == payload.new_date,
-            Appointment.start_time == payload.new_start_time,
-            Appointment.status.in_(["Confirmed", "Rescheduled"]),
-            Appointment.id != apt.id
+    # Check conflict at new time
+    conflict = db.query(Appointment).filter(
+        Appointment.doctor_id == apt.doctor_id,
+        Appointment.date == payload.new_date,
+        Appointment.start_time == payload.new_start_time,
+        Appointment.status.in_(["Confirmed", "Rescheduled"]),
+        Appointment.id != apt.id
+    ).first()
+
+    if conflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Target time slot {payload.new_start_time} is already booked."
+        )
+
+    # Release old slot
+    if apt.slot_id:
+        old_slot = db.query(Slot).filter(Slot.id == apt.slot_id).first()
+        if old_slot:
+            old_slot.is_available = True
+            db.add(old_slot)
+
+    # Find or reserve new slot
+    new_slot = None
+    if payload.new_slot_id:
+        new_slot = db.query(Slot).filter(Slot.id == payload.new_slot_id).first()
+    else:
+        new_slot = db.query(Slot).filter(
+            Slot.doctor_id == apt.doctor_id,
+            Slot.date == payload.new_date,
+            Slot.start_time == payload.new_start_time
         ).first()
 
-        if conflict:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Target time slot {payload.new_start_time} is already booked."
-            )
+    if new_slot:
+        new_slot.is_available = False
+        db.add(new_slot)
+        apt.slot_id = new_slot.id
 
-        # Release old slot
-        if apt.slot_id:
-            old_slot = db.query(Slot).filter(Slot.id == apt.slot_id).first()
-            if old_slot:
-                old_slot.is_available = True
-                db.add(old_slot)
+    end_time = payload.new_end_time
+    if not end_time:
+        sh, sm = map(int, payload.new_start_time.split(":"))
+        em = sm + 30
+        eh = sh + (em // 60)
+        em = em % 60
+        end_time = f"{eh:02d}:{em:02d}"
 
-        # Find or reserve new slot
-        new_slot = None
-        if payload.new_slot_id:
-            new_slot = db.query(Slot).filter(Slot.id == payload.new_slot_id).first()
-        else:
-            new_slot = db.query(Slot).filter(
-                Slot.doctor_id == apt.doctor_id,
-                Slot.date == payload.new_date,
-                Slot.start_time == payload.new_start_time
-            ).first()
+    old_date, old_time = apt.date, apt.start_time
+    apt.date = payload.new_date
+    apt.start_time = payload.new_start_time
+    apt.end_time = end_time
+    apt.status = "Rescheduled"
+    apt.updated_at = datetime.now(timezone.utc)
 
-        if new_slot:
-            new_slot.is_available = False
-            db.add(new_slot)
-            apt.slot_id = new_slot.id
-
-        end_time = payload.new_end_time
-        if not end_time:
-            sh, sm = map(int, payload.new_start_time.split(":"))
-            em = sm + 30
-            eh = sh + (em // 60)
-            em = em % 60
-            end_time = f"{eh:02d}:{em:02d}"
-
-        old_date, old_time = apt.date, apt.start_time
-        apt.date = payload.new_date
-        apt.start_time = payload.new_start_time
-        apt.end_time = end_time
-        apt.status = "Rescheduled"
-        apt.updated_at = datetime.now(timezone.utc)
-
+    try:
         db.commit()
         db.refresh(apt)
-
-        record_audit(
-            db,
-            event_type="APPOINTMENT_RESCHEDULED",
-            actor_role=current_user.role,
-            actor_id=current_user.id,
-            details={
-                "appointment_id": apt.id,
-                "from": f"{old_date} {old_time}",
-                "to": f"{apt.date} {apt.start_time}"
-            }
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Target time slot {payload.new_start_time} is already booked."
         )
 
-        doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
-        pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    record_audit(
+        db,
+        event_type="APPOINTMENT_RESCHEDULED",
+        actor_role=current_user.role,
+        actor_id=current_user.id,
+        details={
+            "appointment_id": apt.id,
+            "from": f"{old_date} {old_time}",
+            "to": f"{apt.date} {apt.start_time}"
+        }
+    )
 
-        return AppointmentOut(
-            id=apt.id,
-            doctor_id=apt.doctor_id,
-            patient_id=apt.patient_id,
-            slot_id=apt.slot_id,
-            date=apt.date,
-            start_time=apt.start_time,
-            end_time=apt.end_time,
-            status=apt.status,
-            created_at=apt.created_at,
-            updated_at=apt.updated_at,
-            doctor_name=doc.name if doc else None,
-            patient_name=pat.name if pat else None,
-            specialization=doc.specialization if doc else None
-        )
+    doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
+    pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+
+    return AppointmentOut(
+        id=apt.id,
+        doctor_id=apt.doctor_id,
+        patient_id=apt.patient_id,
+        slot_id=apt.slot_id,
+        date=apt.date,
+        start_time=apt.start_time,
+        end_time=apt.end_time,
+        status=apt.status,
+        created_at=apt.created_at,
+        updated_at=apt.updated_at,
+        doctor_name=doc.name if doc else None,
+        patient_name=pat.name if pat else None,
+        specialization=doc.specialization if doc else None
+    )
 
 @router.post("/{appointment_id}/cancel", response_model=AppointmentOut)
 def cancel_appointment(
@@ -362,52 +373,53 @@ def cancel_appointment(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    with _booking_lock:
-        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-        if not apt:
-            raise HTTPException(status_code=404, detail="Appointment not found")
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if apt.status == "Cancelled":
-            raise HTTPException(status_code=400, detail="Appointment is already cancelled")
+    if apt.status == "Cancelled":
+        raise HTTPException(status_code=400, detail="Appointment is already cancelled")
 
-        # Release slot
-        if apt.slot_id:
-            slot = db.query(Slot).filter(Slot.id == apt.slot_id).first()
-            if slot:
-                slot.is_available = True
-                db.add(slot)
+    # Release slot
+    if apt.slot_id:
+        slot = db.query(Slot).filter(Slot.id == apt.slot_id).first()
+        if slot:
+            slot.is_available = True
+            db.add(slot)
 
-        apt.status = "Cancelled"
-        apt.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(apt)
+    apt.status = "Cancelled"
+    apt.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(apt)
 
-        record_audit(
-            db,
-            event_type="APPOINTMENT_CANCELLED",
-            actor_role=current_user.role,
-            actor_id=current_user.id,
-            details={"appointment_id": apt.id, "slot_released": apt.slot_id}
-        )
+    APPOINTMENTS_CANCELLED.inc()
 
-        doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
-        pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    record_audit(
+        db,
+        event_type="APPOINTMENT_CANCELLED",
+        actor_role=current_user.role,
+        actor_id=current_user.id,
+        details={"appointment_id": apt.id, "slot_released": apt.slot_id}
+    )
 
-        return AppointmentOut(
-            id=apt.id,
-            doctor_id=apt.doctor_id,
-            patient_id=apt.patient_id,
-            slot_id=apt.slot_id,
-            date=apt.date,
-            start_time=apt.start_time,
-            end_time=apt.end_time,
-            status=apt.status,
-            created_at=apt.created_at,
-            updated_at=apt.updated_at,
-            doctor_name=doc.name if doc else None,
-            patient_name=pat.name if pat else None,
-            specialization=doc.specialization if doc else None
-        )
+    doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
+    pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+
+    return AppointmentOut(
+        id=apt.id,
+        doctor_id=apt.doctor_id,
+        patient_id=apt.patient_id,
+        slot_id=apt.slot_id,
+        date=apt.date,
+        start_time=apt.start_time,
+        end_time=apt.end_time,
+        status=apt.status,
+        created_at=apt.created_at,
+        updated_at=apt.updated_at,
+        doctor_name=doc.name if doc else None,
+        patient_name=pat.name if pat else None,
+        specialization=doc.specialization if doc else None
+    )
 
 @router.post("/{appointment_id}/complete", response_model=AppointmentOut)
 def complete_appointment(
@@ -416,42 +428,43 @@ def complete_appointment(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Marks an appointment as Completed by the physician."""
-    with _booking_lock:
-        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-        if not apt:
-            raise HTTPException(status_code=404, detail="Appointment not found")
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if apt.status == "Cancelled":
-            raise HTTPException(status_code=400, detail="Cannot complete a cancelled appointment")
+    if apt.status == "Cancelled":
+        raise HTTPException(status_code=400, detail="Cannot complete a cancelled appointment")
 
-        apt.status = "Completed"
-        apt.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(apt)
+    apt.status = "Completed"
+    apt.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(apt)
 
-        record_audit(
-            db,
-            event_type="APPOINTMENT_COMPLETED",
-            actor_role=current_user.role,
-            actor_id=current_user.id,
-            details={"appointment_id": apt.id, "doctor_id": apt.doctor_id}
-        )
+    APPOINTMENTS_COMPLETED.inc()
 
-        doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
-        pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    record_audit(
+        db,
+        event_type="APPOINTMENT_COMPLETED",
+        actor_role=current_user.role,
+        actor_id=current_user.id,
+        details={"appointment_id": apt.id, "doctor_id": apt.doctor_id}
+    )
 
-        return AppointmentOut(
-            id=apt.id,
-            doctor_id=apt.doctor_id,
-            patient_id=apt.patient_id,
-            slot_id=apt.slot_id,
-            date=apt.date,
-            start_time=apt.start_time,
-            end_time=apt.end_time,
-            status=apt.status,
-            created_at=apt.created_at,
-            updated_at=apt.updated_at,
-            doctor_name=doc.name if doc else None,
-            patient_name=pat.name if pat else None,
-            specialization=doc.specialization if doc else None
-        )
+    doc = db.query(Doctor).filter(Doctor.id == apt.doctor_id).first()
+    pat = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+
+    return AppointmentOut(
+        id=apt.id,
+        doctor_id=apt.doctor_id,
+        patient_id=apt.patient_id,
+        slot_id=apt.slot_id,
+        date=apt.date,
+        start_time=apt.start_time,
+        end_time=apt.end_time,
+        status=apt.status,
+        created_at=apt.created_at,
+        updated_at=apt.updated_at,
+        doctor_name=doc.name if doc else None,
+        patient_name=pat.name if pat else None,
+        specialization=doc.specialization if doc else None
+    )

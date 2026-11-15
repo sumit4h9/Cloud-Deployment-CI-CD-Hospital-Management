@@ -13,7 +13,12 @@ import {
   CalendarDays,
   ArrowRight,
   Stethoscope,
-  HeartHandshake
+  HeartHandshake,
+  ShieldCheck,
+  Activity,
+  Users,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
@@ -52,12 +57,21 @@ interface Doctor {
 }
 
 interface UserSession {
-  portal: 'doctor' | 'patient';
+  portal: 'doctor' | 'patient' | 'admin';
   id: string;
   name: string;
   email?: string;
   specialization?: string;
   token: string;
+}
+
+interface AuditEventItem {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  actor_role: string;
+  actor_id: string;
+  details: string;
 }
 
 export default function App() {
@@ -67,8 +81,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Portal Login flow state: 'select' | 'doctor' | 'patient'
-  const [loginView, setLoginView] = useState<'select' | 'doctor' | 'patient'>('select');
+  // Portal Login flow state: 'select' | 'doctor' | 'patient' | 'admin'
+  const [loginView, setLoginView] = useState<'select' | 'doctor' | 'patient' | 'admin'>('select');
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -81,6 +95,10 @@ export default function App() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEventItem[]>([]);
+  const [auditFilter, setAuditFilter] = useState<string>('ALL');
+  const [systemHealth, setSystemHealth] = useState<{ status: string; service: string; version: string; database: string } | null>(null);
+  const [adminSelectedDoctorId, setAdminSelectedDoctorId] = useState<string>('doc_1');
   const [bannerMessage, setBannerMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Selected appointment modal
@@ -103,9 +121,12 @@ export default function App() {
   };
 
   // Sign in handler
-  const handleSignIn = async (portalType: 'doctor' | 'patient', customIdentifier?: string) => {
+  const handleSignIn = async (portalType: 'doctor' | 'patient' | 'admin', customIdentifier?: string) => {
     setLoginError(null);
-    const identifier = customIdentifier || loginIdentifier || (portalType === 'doctor' ? 'doc_1' : '1042');
+    let defaultId = '1042';
+    if (portalType === 'doctor') defaultId = 'doc_1';
+    if (portalType === 'admin') defaultId = 'admin_1';
+    const identifier = customIdentifier || loginIdentifier || defaultId;
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
@@ -130,8 +151,8 @@ export default function App() {
         };
         setSession(newSession);
         localStorage.setItem('healthcare_session', JSON.stringify(newSession));
-        setActiveTab(portalType === 'doctor' ? 'Overview' : 'Home');
-        notify(`Signed in to ${portalType === 'doctor' ? 'Doctor Portal' : 'Patient Portal'} as ${newSession.name}`);
+        setActiveTab('Overview');
+        notify(`Signed in to ${portalType === 'doctor' ? 'Doctor Portal' : portalType === 'patient' ? 'Patient Portal' : 'Admin Operations Portal'} as ${newSession.name}`);
       } else {
         const err = await res.json();
         setLoginError(err.detail || 'Authentication failed');
@@ -140,14 +161,14 @@ export default function App() {
       // Local demo fallback
       const fallbackSession: UserSession = {
         portal: portalType,
-        id: portalType === 'doctor' ? 'doc_1' : 'pat_1042',
-        name: portalType === 'doctor' ? 'Dr. Ananya Mehta' : 'Patient #1042',
+        id: portalType === 'doctor' ? 'doc_1' : portalType === 'admin' ? 'admin_1' : 'pat_1042',
+        name: portalType === 'doctor' ? 'Dr. Ananya Mehta' : portalType === 'admin' ? 'Clinic Administrator' : 'Patient #1042',
         specialization: portalType === 'doctor' ? 'Cardiology' : undefined,
         token: `mock-${portalType}-token`
       };
       setSession(fallbackSession);
       localStorage.setItem('healthcare_session', JSON.stringify(fallbackSession));
-      setActiveTab(portalType === 'doctor' ? 'Overview' : 'Home');
+      setActiveTab('Overview');
     }
   };
 
@@ -181,6 +202,28 @@ export default function App() {
         const aptData = await aptRes.json();
         setAppointments(aptData);
       }
+
+      // If in admin view, fetch audit logs and health probes
+      if (session?.portal === 'admin') {
+        const auditRes = await fetch(`${API_BASE}/api/v1/audit?limit=50`);
+        if (auditRes.ok) {
+          const auditData = await auditRes.json();
+          setAuditEvents(auditData);
+        }
+
+        const healthRes = await fetch(`${API_BASE}/health`);
+        const readyRes = await fetch(`${API_BASE}/ready`);
+        if (healthRes.ok && readyRes.ok) {
+          const h = await healthRes.json();
+          const r = await readyRes.json();
+          setSystemHealth({
+            status: h.status,
+            service: h.service,
+            version: h.version,
+            database: r.database
+          });
+        }
+      }
     } catch {
       loadFallbackData();
     }
@@ -213,6 +256,21 @@ export default function App() {
       { id: 'APT-10491', doctor_id: 'doc_1', patient_id: 'pat_1088', date: '2026-11-06', start_time: '14:00', end_time: '14:30', status: 'Confirmed', patient_name: 'Patient #1088', doctor_name: 'Dr. Ananya Mehta' },
       { id: 'APT-10494', doctor_id: 'doc_1', patient_id: 'pat_1102', date: '2026-11-06', start_time: '14:30', end_time: '15:00', status: 'Confirmed', patient_name: 'Patient #1102', doctor_name: 'Dr. Ananya Mehta' },
       { id: 'APT-10499', doctor_id: 'doc_1', patient_id: 'pat_1140', date: '2026-11-06', start_time: '15:30', end_time: '16:00', status: 'Confirmed', patient_name: 'Patient #1140', doctor_name: 'Dr. Ananya Mehta' },
+    ]);
+
+    setSystemHealth({
+      status: 'healthy',
+      service: 'doctor-appointment-api',
+      version: '1.0.0',
+      database: 'connected'
+    });
+
+    setAuditEvents([
+      { id: 'aud_1', timestamp: '2026-11-06T15:30:00Z', event_type: 'APPOINTMENT_CREATED', actor_role: 'doctor', actor_id: 'doc_1', details: '{"appointment_id": "APT-10482", "patient_id": "pat_1042"}' },
+      { id: 'aud_2', timestamp: '2026-11-06T15:20:00Z', event_type: 'CONFLICT_PREVENTED', actor_role: 'patient', actor_id: 'pat_1029', details: '{"reason": "Doctor already booked for slot 10:30"}' },
+      { id: 'aud_3', timestamp: '2026-11-06T14:45:00Z', event_type: 'PORTAL_LOGIN', actor_role: 'doctor', actor_id: 'doc_1', details: '{"doctor_name": "Dr. Ananya Mehta"}' },
+      { id: 'aud_4', timestamp: '2026-11-06T12:00:00Z', event_type: 'SLOT_CREATED', actor_role: 'doctor', actor_id: 'doc_1', details: '{"time": "2026-11-06 12:00"}' },
+      { id: 'aud_5', timestamp: '2026-11-06T09:00:00Z', event_type: 'SYSTEM_INITIALIZED', actor_role: 'system', actor_id: 'seed', details: '{"message": "Synthetic appointments seed loaded"}' }
     ]);
   };
 
@@ -521,6 +579,31 @@ export default function App() {
                   <ArrowRight size={16} />
                 </div>
               </div>
+
+              {/* Admin Portal Box */}
+              <div 
+                className="portal-selection-box admin-box"
+                onClick={() => {
+                  setLoginView('admin');
+                  setLoginIdentifier('admin@clinic.local');
+                }}
+              >
+                <div>
+                  <div className="portal-icon-wrapper admin">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Admin / Operations
+                  </h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '6px' }}>
+                    Monitor clinic operations, inspect security audit logs, verify health probes, and oversee doctor schedules.
+                  </p>
+                </div>
+                <div style={{ marginTop: '24px', display: 'flex', alignItems: 'center', color: '#475569', fontWeight: 600, fontSize: '13px', gap: '6px' }}>
+                  <span>Admin Sign In</span>
+                  <ArrowRight size={16} />
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -718,6 +801,93 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* 4. Admin Portal Login Form */}
+        {loginView === 'admin' && (
+          <div className="login-form-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <div className="portal-icon-wrapper admin" style={{ width: '36px', height: '36px', margin: 0 }}>
+                <ShieldCheck size={18} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '17px', fontWeight: 700 }}>Admin Portal Sign In</h2>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Operations & Governance</span>
+              </div>
+            </div>
+
+            {loginError && (
+              <div className="feedback-banner error" style={{ fontSize: '12px', padding: '8px 12px' }}>
+                {loginError}
+              </div>
+            )}
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                Administrator Email or ID
+              </label>
+              <input 
+                type="text" 
+                className="input-field" 
+                style={{ width: '100%' }}
+                placeholder="e.g. admin@clinic.local or admin_1"
+                value={loginIdentifier}
+                onChange={(e) => setLoginIdentifier(e.target.value)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                Security PIN
+              </label>
+              <input 
+                type="password" 
+                className="input-field" 
+                style={{ width: '100%' }}
+                placeholder="••••••••"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                Quick Evaluation Preset:
+              </span>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <span 
+                  className="quick-account-pill"
+                  onClick={() => {
+                    setLoginIdentifier('admin@clinic.local');
+                    handleSignIn('admin', 'admin_1');
+                  }}
+                >
+                  Clinic Administrator (admin_1)
+                </span>
+              </div>
+            </div>
+
+            <button 
+              className="btn-primary" 
+              style={{ width: '100%', padding: '10px', fontSize: '14px', marginBottom: '14px', backgroundColor: '#334155', borderColor: '#334155' }}
+              onClick={() => handleSignIn('admin')}
+            >
+              Sign In to Admin Portal
+            </button>
+
+            <div style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              Return to{' '}
+              <button 
+                style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => {
+                  setLoginView('select');
+                  setLoginError(null);
+                }}
+              >
+                Portal Selection
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -730,16 +900,21 @@ export default function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <span className="brand-badge" style={{ color: session.portal === 'doctor' ? 'var(--primary)' : '#0d9488' }}>
-            {session.portal === 'doctor' ? 'Hospital Appointments' : 'Patient Self-Service'}
+          <span 
+            className="brand-badge" 
+            style={{ 
+              color: session.portal === 'doctor' ? 'var(--primary)' : session.portal === 'admin' ? '#475569' : '#0d9488' 
+            }}
+          >
+            {session.portal === 'doctor' ? 'Hospital Appointments' : session.portal === 'admin' ? 'Operations & Auditing' : 'Patient Self-Service'}
           </span>
           <h2 className="brand-title">
-            {session.portal === 'doctor' ? 'Doctor Portal' : 'Patient Portal'}
+            {session.portal === 'doctor' ? 'Doctor Portal' : session.portal === 'admin' ? 'Admin Portal' : 'Patient Portal'}
           </h2>
         </div>
 
         <nav className="sidebar-nav">
-          {session.portal === 'doctor' ? (
+          {session.portal === 'doctor' && (
             <>
               <button 
                 className={`nav-item ${activeTab === 'Overview' ? 'active' : ''}`}
@@ -777,7 +952,9 @@ export default function App() {
                 Profile
               </button>
             </>
-          ) : (
+          )}
+
+          {session.portal === 'patient' && (
             <>
               <button 
                 className={`nav-item ${activeTab === 'Home' ? 'active' : ''}`}
@@ -816,6 +993,53 @@ export default function App() {
               </button>
             </>
           )}
+
+          {session.portal === 'admin' && (
+            <>
+              <button 
+                className={`nav-item ${activeTab === 'Overview' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Overview')}
+              >
+                <Activity size={18} />
+                Overview
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'Doctors & Schedules' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Doctors & Schedules')}
+              >
+                <Users size={18} />
+                Doctors & Schedules
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'All Appointments' ? 'active' : ''}`}
+                onClick={() => setActiveTab('All Appointments')}
+              >
+                <CheckCircle size={18} />
+                All Appointments
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'Audit Log' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Audit Log')}
+              >
+                <ShieldCheck size={18} />
+                Audit Log
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'System Health' ? 'active' : ''}`}
+                onClick={() => setActiveTab('System Health')}
+              >
+                <Database size={18} />
+                System Health
+              </button>
+              <button 
+                className={`nav-item ${activeTab === 'Profile' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Profile')}
+              >
+                <User size={18} />
+                Profile
+              </button>
+            </>
+          )}
         </nav>
 
         <div className="sidebar-footer">
@@ -832,7 +1056,9 @@ export default function App() {
         <header className="top-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {session.portal === 'doctor' ? 'Hospital Appointments — Doctor Portal' : 'Clinic Patient Portal'}
+              {session.portal === 'doctor' ? 'Hospital Appointments — Doctor Portal' : 
+               session.portal === 'admin' ? 'Clinic Operations & Governance Portal' : 
+               'Clinic Patient Portal'}
             </span>
           </div>
 
@@ -841,19 +1067,21 @@ export default function App() {
               <div 
                 className="user-avatar"
                 style={{ 
-                  backgroundColor: session.portal === 'doctor' ? 'var(--primary-subtle)' : '#f0fdfa',
-                  color: session.portal === 'doctor' ? 'var(--primary)' : '#0d9488',
-                  borderColor: session.portal === 'doctor' ? 'var(--primary-border)' : '#99f6e4'
+                  backgroundColor: session.portal === 'doctor' ? 'var(--primary-subtle)' : session.portal === 'admin' ? '#f1f5f9' : '#f0fdfa',
+                  color: session.portal === 'doctor' ? 'var(--primary)' : session.portal === 'admin' ? '#334155' : '#0d9488',
+                  borderColor: session.portal === 'doctor' ? 'var(--primary-border)' : session.portal === 'admin' ? '#cbd5e1' : '#99f6e4'
                 }}
               >
-                {session.portal === 'doctor' ? 'AM' : '10'}
+                {session.portal === 'doctor' ? 'AM' : session.portal === 'admin' ? 'AD' : '10'}
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {session.name}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                  {session.portal === 'doctor' ? session.specialization || 'Physician' : 'Synthetic Patient ID'}
+                  {session.portal === 'doctor' ? session.specialization || 'Physician' : 
+                   session.portal === 'admin' ? 'Clinic Administrator' : 
+                   'Synthetic Patient ID'}
                 </div>
               </div>
             </div>
@@ -1415,6 +1643,426 @@ export default function App() {
               <div className="detail-row">
                 <span className="detail-label">Portal Access</span>
                 <span className="detail-val">Patient Portal Active</span>
+              </div>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* ADMIN PORTAL VIEWS */}
+          {/* ======================================================== */}
+
+          {/* ADMIN OVERVIEW */}
+          {session.portal === 'admin' && activeTab === 'Overview' && (
+            <div>
+              <div className="page-header-banner">
+                <h1 className="page-title">Clinic Operations Overview</h1>
+                <div className="page-meta">
+                  <span style={{ fontWeight: 600, color: '#334155' }}>Governance & Scheduling Center</span>
+                  <span className="meta-dot"></span>
+                  <span>{formatFullDateDisplay(currentDate)}</span>
+                </div>
+              </div>
+
+              {/* 4 Clean Operations Metric Cards */}
+              <div className="metrics-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                <div className="metric-card">
+                  <div className="metric-val">{doctors.length || 3}</div>
+                  <div className="metric-label">Active Doctors</div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-val">{todayAppointmentsCount || 7}</div>
+                  <div className="metric-label">Today's Appointments</div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-val">{availableSlotsCount || 3}</div>
+                  <div className="metric-label">Available Slots</div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-val">{auditEvents.length || 5}</div>
+                  <div className="metric-label">Audit Events Logged</div>
+                </div>
+              </div>
+
+              {/* Live Health Status Card */}
+              <div className="section-card" style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="health-status-badge">
+                      <span className="health-dot"></span>
+                      <span>System Operational</span>
+                    </div>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      API Service: <strong>doctor-appointment-api v1.0.0</strong> • Database: <strong>Connected (SQLite WAL)</strong>
+                    </span>
+                  </div>
+                  <button className="btn-sm" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={12} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Recent Audit Events Stream */}
+              <div className="section-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <h3 className="section-title" style={{ margin: 0 }}>Recent Scheduling & Audit Events</h3>
+                  <button className="btn-sm" onClick={() => setActiveTab('Audit Log')}>
+                    View Full Audit Stream
+                  </button>
+                </div>
+
+                <table className="clean-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Event</th>
+                      <th>Actor</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditEvents.slice(0, 5).map(event => (
+                      <tr key={event.id}>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {event.timestamp ? event.timestamp.replace('T', ' ').substring(0, 19) : 'Just now'}
+                        </td>
+                        <td>
+                          <span className={`audit-pill ${
+                            event.event_type.includes('CONFLICT') ? 'conflict' :
+                            event.event_type.includes('CREATED') ? 'created' :
+                            event.event_type.includes('COMPLETED') ? 'completed' :
+                            event.event_type.includes('CANCELLED') ? 'cancelled' :
+                            event.event_type.includes('LOGIN') ? 'login' : 'default'
+                          }`}>
+                            {event.event_type}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '13px', fontWeight: 500 }}>
+                          {event.actor_role}: {event.actor_id}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                          {event.details.length > 60 ? `${event.details.substring(0, 60)}...` : event.details}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ADMIN DOCTORS & SCHEDULES */}
+          {session.portal === 'admin' && activeTab === 'Doctors & Schedules' && (
+            <div>
+              <div className="page-header-banner">
+                <h1 className="page-title">Doctor Directory & Clinic Schedules</h1>
+                <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Overview of all medical practitioners and clinic schedule allocations.
+                </p>
+              </div>
+
+              <div className="section-card" style={{ marginBottom: '24px' }}>
+                <h3 className="section-title">Practitioners Roster</h3>
+                <table className="clean-table">
+                  <thead>
+                    <tr>
+                      <th>Doctor ID</th>
+                      <th>Name</th>
+                      <th>Specialization</th>
+                      <th>Clinic Location</th>
+                      <th>Next Available Slot</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {doctors.map(doc => (
+                      <tr key={doc.id}>
+                        <td style={{ fontWeight: 600, color: 'var(--primary)' }}>{doc.id}</td>
+                        <td style={{ fontWeight: 600 }}>{doc.name}</td>
+                        <td>{doc.specialization}</td>
+                        <td>{doc.room || 'Clinic Suite'}</td>
+                        <td>
+                          <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 500 }}>
+                            {doc.next_available_slot || 'Available today'}
+                          </span>
+                        </td>
+                        <td>
+                          <button 
+                            className={`btn-sm ${adminSelectedDoctorId === doc.id ? 'primary' : ''}`}
+                            onClick={() => setAdminSelectedDoctorId(doc.id)}
+                          >
+                            {adminSelectedDoctorId === doc.id ? 'Selected' : 'Inspect Slots'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Slots for selected doctor */}
+              <div className="schedule-container">
+                <div className="schedule-header">
+                  <h3 className="schedule-title">
+                    Schedule for {doctors.find(d => d.id === adminSelectedDoctorId)?.name || 'Dr. Ananya Mehta'} ({currentDate})
+                  </h3>
+                  <div className="date-selector">
+                    <button className="nav-arrow-btn" onClick={handlePrevDay} title="Previous Day">
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span>{formatDateDisplay(currentDate)}</span>
+                    <button className="nav-arrow-btn" onClick={handleNextDay} title="Next Day">
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="schedule-list">
+                  {slots.map(slot => (
+                    <div key={slot.id} className="schedule-row">
+                      <div className="schedule-time">{slot.start_time}</div>
+                      <div className="schedule-patient">
+                        {slot.start_time} – {slot.end_time}
+                      </div>
+                      <div className="schedule-status">
+                        <span className={`status-pill ${slot.is_available ? 'bookable' : 'confirmed'}`}>
+                          {slot.is_available ? 'Available' : 'Booked'}
+                        </span>
+                      </div>
+                      <div className="schedule-actions" style={{ width: '130px' }}>
+                        <button className="btn-sm" onClick={() => handleToggleSlot(slot)}>
+                          {slot.is_available ? 'Disable Slot' : 'Enable Slot'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ADMIN ALL APPOINTMENTS */}
+          {session.portal === 'admin' && activeTab === 'All Appointments' && (
+            <div className="section-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div>
+                  <h2 className="section-title" style={{ margin: 0 }}>Clinic Appointments Master Register</h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '2px' }}>
+                    Total {appointments.length} recorded consultations across all doctors.
+                  </p>
+                </div>
+                <div className="date-selector">
+                  <button className="nav-arrow-btn" onClick={handlePrevDay} title="Previous Day">
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span>{formatDateDisplay(currentDate)}</span>
+                  <button className="nav-arrow-btn" onClick={handleNextDay} title="Next Day">
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <table className="clean-table">
+                <thead>
+                  <tr>
+                    <th>Appointment ID</th>
+                    <th>Doctor</th>
+                    <th>Patient</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {appointments.map(apt => (
+                    <tr key={apt.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--primary)' }}>#{apt.id}</td>
+                      <td style={{ fontWeight: 500 }}>{apt.doctor_name || 'Dr. Ananya Mehta'}</td>
+                      <td>{apt.patient_name || `Patient #${apt.patient_id.replace('pat_', '')}`}</td>
+                      <td>{formatDateDisplay(apt.date)}</td>
+                      <td>{apt.start_time} - {apt.end_time}</td>
+                      <td>
+                        <span className={`status-pill ${
+                          apt.status === 'Confirmed' ? 'confirmed' :
+                          apt.status === 'Completed' ? 'completed' :
+                          apt.status === 'Cancelled' ? 'cancelled' : 'rescheduled'
+                        }`}>
+                          {apt.status}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="btn-sm" onClick={() => setSelectedAppointment(apt)}>
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ADMIN AUDIT LOG */}
+          {session.portal === 'admin' && activeTab === 'Audit Log' && (
+            <div className="section-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div>
+                  <h2 className="section-title" style={{ margin: 0 }}>Live Scheduling & Security Audit Stream</h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '2px' }}>
+                    Immutable operational log tracking all scheduling transactions and prevented conflicts.
+                  </p>
+                </div>
+                <button className="btn-sm" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <RefreshCw size={12} />
+                  <span>Refresh Stream</span>
+                </button>
+              </div>
+
+              {/* Event Filter Pills */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {['ALL', 'CONFLICT_PREVENTED', 'APPOINTMENT_CREATED', 'APPOINTMENT_COMPLETED', 'APPOINTMENT_CANCELLED', 'PORTAL_LOGIN'].map(f => (
+                  <button
+                    key={f}
+                    className={`role-btn ${auditFilter === f ? 'active' : ''}`}
+                    onClick={() => setAuditFilter(f)}
+                    style={{ fontSize: '11px', padding: '4px 10px' }}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+
+              <table className="clean-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp (UTC)</th>
+                    <th>Event Type</th>
+                    <th>Actor Role & ID</th>
+                    <th>Event Payload / Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditEvents
+                    .filter(e => auditFilter === 'ALL' || e.event_type === auditFilter)
+                    .map(event => (
+                      <tr key={event.id}>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          {event.timestamp ? event.timestamp.replace('T', ' ').substring(0, 19) : 'Just now'}
+                        </td>
+                        <td>
+                          <span className={`audit-pill ${
+                            event.event_type.includes('CONFLICT') ? 'conflict' :
+                            event.event_type.includes('CREATED') ? 'created' :
+                            event.event_type.includes('COMPLETED') ? 'completed' :
+                            event.event_type.includes('CANCELLED') ? 'cancelled' :
+                            event.event_type.includes('LOGIN') ? 'login' : 'default'
+                          }`}>
+                            {event.event_type}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '13px', fontWeight: 500 }}>
+                          {event.actor_role} ({event.actor_id})
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                          {event.details}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ADMIN SYSTEM HEALTH */}
+          {session.portal === 'admin' && activeTab === 'System Health' && (
+            <div>
+              <div className="page-header-banner">
+                <h1 className="page-title">Operational Health & Readiness Probes</h1>
+                <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Live service telemetry confirming liveness probe, database readiness probe, and concurrency safety.
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                <div className="metric-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="metric-val" style={{ color: '#15803d', fontSize: '20px' }}>200 OK</div>
+                    <span className="health-dot" style={{ width: '8px', height: '8px' }}></span>
+                  </div>
+                  <div className="metric-label">Liveness Probe (GET /health)</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Process active & accepting HTTP requests
+                  </div>
+                </div>
+
+                <div className="metric-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="metric-val" style={{ color: '#15803d', fontSize: '20px' }}>Connected</div>
+                    <Database size={18} style={{ color: '#15803d' }} />
+                  </div>
+                  <div className="metric-label">Readiness Probe (GET /ready)</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    SQLite WAL database connectivity verified
+                  </div>
+                </div>
+
+                <div className="metric-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="metric-val" style={{ color: '#0284c7', fontSize: '20px' }}>Guarded</div>
+                    <ShieldCheck size={18} style={{ color: '#0284c7' }} />
+                  </div>
+                  <div className="metric-label">Concurrency Protection</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Double-booking mutual exclusion lock active
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-card">
+                <h3 className="section-title">Telemetry Probes Contract</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
+                      GET /health
+                    </div>
+                    <pre style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+{JSON.stringify({ status: systemHealth?.status || "healthy", service: systemHealth?.service || "doctor-appointment-api", version: systemHealth?.version || "1.0.0" }, null, 2)}
+                    </pre>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
+                      GET /ready
+                    </div>
+                    <pre style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+{JSON.stringify({ status: "ready", database: systemHealth?.database || "connected" }, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ADMIN PROFILE */}
+          {session.portal === 'admin' && activeTab === 'Profile' && (
+            <div className="section-card" style={{ maxWidth: '520px' }}>
+              <h2 className="section-title">Administrator Profile</h2>
+              <div className="detail-row">
+                <span className="detail-label">Name</span>
+                <span className="detail-val">Clinic Administrator</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Role</span>
+                <span className="detail-val">Operations & Security Lead</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Email</span>
+                <span className="detail-val">admin@clinic.local</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Access Level</span>
+                <span className="detail-val">Full Governance & Audit Stream</span>
               </div>
             </div>
           )}

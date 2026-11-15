@@ -94,3 +94,27 @@ def test_invalid_doctor_reference():
     res = client.post("/api/v1/appointments", json=payload)
     assert res.status_code == 400
 
+def test_clinic_operating_hours_validation():
+    # Attempt booking outside operating hours (before 08:00)
+    early_payload = {
+        "doctor_id": "doc_1",
+        "patient_id": "pat_1014",
+        "date": "2026-11-06",
+        "start_time": "06:30"
+    }
+    res_early = client.post("/api/v1/appointments", json=early_payload)
+    assert res_early.status_code == 400
+    assert "outside clinic operating hours" in res_early.json()["detail"]
+
+    # Attempt booking after operating hours (after 18:00)
+    late_payload = {
+        "doctor_id": "doc_1",
+        "patient_id": "pat_1014",
+        "date": "2026-11-06",
+        "start_time": "19:00"
+    }
+    res_late = client.post("/api/v1/appointments", json=late_payload)
+    assert res_late.status_code == 400
+    assert "outside clinic operating hours" in res_late.json()["detail"]
+
+

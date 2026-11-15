@@ -1,117 +1,236 @@
-# Doctor Appointment Scheduling Platform & API
+# Healthcare Management Platform — Doctor Appointment System
 
-A focused, production-grade appointment management platform designed strictly within the required assessment scope: **a doctor appointment scheduling service using synthetic patient data**, avoiding the visual noise and excessive clinical complexity of full EMR/EHR software.
-
----
-
-## 🎯 Design Philosophy: Real Product vs. AI-Generated EMR
-
-| Previous AI-Generated Prototype | Redesigned Realistic Product |
-| :--- | :--- |
-| **Noise & Density**: 20+ tiny metadata pills, audit cycles, session timeouts (`SEC-AUD-4491`), hospital census | **40% Density Reduction**: Clear typography, focused hierarchy, only elements that help schedule/reschedule/cancel |
-| **Invented Clinical Details**: Vitals, prescriptions, fake diagnoses, ECG reviews, chart sign-offs | **Appointment-Focused**: Time, Patient ID, Status, Action (`View`, `Reschedule`, `Cancel`) |
-| **Fake Enterprise Complexities**: HIPAA barriers, OR allocation, hyperspace console IDs | **Clean Healthcare Aesthetic**: Light neutral background, dark charcoal text, restrained healthcare blue/teal (`#0284C7`) |
-| **Blurred Roles**: Jumbled clinical admin, doctor, patient, and IT console controls | **Role-Specific Views**: Dedicated Doctor Portal (`Dr. Ananya Mehta`) and Patient Portal (`Patient #1042`) |
+A high-reliability, production-grade appointment management platform designed strictly within the required assignment scope: **a doctor appointment scheduling service using synthetic patient data**, avoiding the visual noise and excessive clinical complexity of full EMR/EHR software.
 
 ---
 
-## 🩺 System Capabilities & Assessment Scope
+## 🎯 Architecture Overview
 
-1. **Service**: Doctor Appointment API.
-2. **Health & Readiness Endpoints**:
-   - `GET /health`: Liveness probe (`{"status": "healthy"}`).
-   - `GET /ready`: Readiness probe verifying database connectivity (`{"status": "ready", "database": "connected"}`).
-3. **Doctor & Slot Management**:
-   - List doctors, filter by specialization and date.
-   - List doctor slots with availability status (`Available` or `Booked`).
-   - Doctor ability to add or toggle availability (`[Add Slot]`, `[Disable Slot]`).
-4. **Appointment Lifecycle**:
-   - Create, reschedule, and cancel appointments.
-   - Validation for doctor/patient existence and time window boundaries.
-5. **Concurrency & Race Condition Protection**:
-   - Atomic reservation lock preventing double-booking of the same doctor/time slot under concurrent requests.
-   - Verified via automated test firing 10 concurrent requests simultaneously; guarantees exactly 1 success (`201 Created`) and 9 conflicts (`409 Conflict`).
-6. **Audit Events**:
-   - Structured audit logging for all scheduling actions (`APPOINTMENT_CREATED`, `APPOINTMENT_RESCHEDULED`, `APPOINTMENT_CANCELLED`, `CONFLICT_PREVENTED`).
-7. **Synthetic Seed Data**:
-   - Preloaded with `Dr. Ananya Mehta` (Cardiology), `Patient #1014`, `Patient #1029`, `Patient #1042`, etc., matching the exact schedule state.
-
----
-
-## 🚀 Quick Start
-
-### One-Command Launch (Tests + Build + Server)
-
-**Windows (PowerShell):**
-```powershell
-.\run.ps1
+```
+                                  TRAFFIC / USERS
+                                         │
+                                         ▼
+                            Ingress: clinic-ingress
+                     ┌───────────────────┴───────────────────┐
+                     │ (path: /)                             │ (path: /api, /health, /metrics)
+                     ▼                                       ▼
+             frontend-service                        backend-service
+                     │                                       │
+            ┌────────┴────────┐                     ┌────────┼────────┐
+            ▼                 ▼                     ▼        ▼        ▼
+       Frontend Pod 1    Frontend Pod 2          Backend  Backend  Backend
+        (Nginx SPA)       (Nginx SPA)             Pod 1    Pod 2    Pod 3...
+                                                    │        │        │
+                                                    └────────┼────────┘
+                                                             │
+                                   ┌─────────────────────────┴─────────────────────────┐
+                                   ▼                                                   ▼
+                          postgres-service                                     worker-deployment
+                       (Headless StatefulSet)                                  (Background Jobs)
+                                   │
+                           postgres-storage
+                                (PVC)
 ```
 
-**Linux / macOS:**
+---
+
+## 🩺 System Capabilities & Core Contracts
+
+1. **Healthcare Service Scope**: Doctor Appointment API & Multi-Role Web Portal.
+2. **Health, Readiness & Metrics Endpoints**:
+   - `GET /health`: Liveness probe (`{"status": "healthy", "service": "doctor-appointment-api", "version": "1.0.0"}`). Never fails when the database is restarting.
+   - `GET /ready`: Readiness probe verifying active database connectivity (`SELECT 1`). Fails with HTTP 503 if the database is temporarily unavailable, cleanly removing the pod from service endpoints.
+   - `GET /metrics`: Prometheus telemetry metrics covering HTTP traffic, domain bookings, cancellations, and prevented concurrency conflicts.
+3. **Role-Based Portals (RBAC)**:
+   - **Doctor Portal**: Daily schedule, 3 clean focus metrics, today's appointments list, appointment completion action (`[Mark as Completed]`), rescheduling, and bookable availability slot management (`[+ Add Slot]`, `[Disable Slot]`).
+   - **Patient Portal**: Upcoming appointment card (`#APT-10482`), specialist search, and self-service slot booking workflow.
+   - **Admin / Operations Portal**: Clinic overview, doctor roster & suite inspector, master appointments register, live security & scheduling audit stream, and probe telemetry contracts.
+4. **Database-Level Concurrency Protection (Multi-Replica Safe)**:
+   - In-memory locks were eliminated in favor of database-level invariants.
+   - **Partial Unique Index**: `CREATE UNIQUE INDEX uq_active_appointment ON appointments (doctor_id, date, start_time) WHERE status IN ('Confirmed', 'Rescheduled');`
+   - **Atomic Conditional Slot Claim**: `UPDATE slots SET is_available = False WHERE id = :id AND is_available = True`
+   - Simultaneous conflicting requests trigger database integrity rollback, record `CONFLICT_PREVENTED` in the audit log, increment Prometheus counters, and return `HTTP 409 Conflict`.
+   - Verified via automated concurrency test firing 10 simultaneous threads: exactly 1 booking succeeds (`201 Created`) and 9 are rejected (`409 Conflict`).
+
+---
+
+## 🚀 Local Deployment Runbook
+
+### 1. Docker Compose (Full 6-Container Microservice Stack)
+
 ```bash
-chmod +x run.sh
-./run.sh
+# Build and launch all services in background
+docker compose up -d --build
+
+# Verify container health status
+docker compose ps
 ```
 
-This command automatically:
-1. Executes all 10 automated concurrency and API tests.
-2. Builds the clean production frontend bundle.
-3. Launches the unified server on `http://localhost:8000`.
+**Exposed Services:**
+- Frontend Web Portal: [http://localhost:80](http://localhost:80)
+- Backend REST API & Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Prometheus Telemetry: [http://localhost:9090](http://localhost:9090)
+- Grafana Observability Dashboards: [http://localhost:3000](http://localhost:3000) (User: `admin` / Password: `admin`)
+- PostgreSQL Persistence: `localhost:5432` (`postgres_data` persistent volume)
 
 ---
 
-## 🔐 Role-Specific Portals & Access
+### 2. Kubernetes Local Deployment (Minikube / K3s)
 
-| Portal | Intended User | Default Credential Preset | Capabilities |
-| :--- | :--- | :--- | :--- |
-| **Doctor Portal** | Physicians & Clinical Staff | `ananya.mehta@clinic.local` / `doc_1` | View daily schedule, 3 clean metrics, today's appointments list, reschedule/cancel modal, and dedicated availability slot management (`[Add Slot]`, `[Disable Slot]`). |
-| **Patient Portal** | Patients (Synthetic) | `Patient #1042` / `1042` | View personal upcoming appointment card, search specialists, and follow a 4-step slot reservation workflow. |
+All manifests in `k8s/` are bundled via Kustomize:
+
+```bash
+# 1. Preview and validate manifests
+kubectl kustomize k8s/
+
+# 2. Deploy the complete stack to namespace 'healthcare'
+kubectl apply -k k8s/
+
+# 3. Verify deployed workloads and pods
+kubectl get all,hpa,pvc,ingress -n healthcare
+```
+
+#### Workloads Deployed:
+- `postgres` (StatefulSet + 2Gi PVC `postgres-storage`): Persistent database with headless service `postgres-service`.
+- `backend-deployment` (Deployment): Stateless API with 2 baseline replicas (autoscales up to 6 via HPA).
+- `frontend-deployment` (Deployment): 2 replicas of the Nginx SPA reverse-proxying API traffic.
+- `worker-deployment` (Deployment): 1 replica running the background job scheduler (reminders, expired slot reclamation).
+- `backend-hpa` (HorizontalPodAutoscaler): Scales backend pods from 2 to 6 based on CPU utilization (> 70%) and memory (> 80%).
+- `prometheus-deployment` & `grafana-deployment`: Local cluster observability stack.
+- `clinic-ingress` (Ingress): Ingress controller routing `/` to frontend and `/api`, `/health`, `/metrics` to backend.
 
 ---
 
-## 🌐 Endpoints & Web Access
+## 📈 Horizontal Pod Autoscaling (HPA)
 
-- **Web Application**: [http://localhost:8000](http://localhost:8000) (Portal gateway)
-- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check (Liveness)**: [http://localhost:8000/health](http://localhost:8000/health)
-- **Readiness Probe**: [http://localhost:8000/ready](http://localhost:8000/ready)
+The backend autoscaler is configured under `autoscaling/v2`:
 
-### Separate Dev Server (Optional)
-If running Vite with Hot Module Replacement (HMR) for frontend development:
-```powershell
-# Terminal 1: Backend
-uvicorn backend.app.main:app --reload --port 8000
-
-# Terminal 2: Frontend
-cd frontend
-npm run dev
+```yaml
+minReplicas: 2
+maxReplicas: 6
+metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
 ```
-Open [http://localhost:5173](http://localhost:5173).
+
+### HPA Scaling Verification:
+```bash
+# 1. Inspect current HPA status
+kubectl get hpa backend-hpa -n healthcare
+
+# 2. Simulate load spike
+kubectl run load-generator --image=busybox --restart=Never -n healthcare -- /bin/sh -c "
+  while true; do wget -q -O- http://backend-service:8000/api/v1/doctors; done
+"
+
+# 3. Observe scaling from 2 -> 4 -> 6 replicas
+kubectl get hpa backend-hpa -n healthcare -w
+
+# 4. Stop load and observe stabilized scale down
+kubectl delete pod load-generator -n healthcare
+```
+
+---
+
+## 🛡️ Resilience & Failure Recovery Procedures
+
+### 1. Pod Failure & Self-Healing
+If any backend or frontend pod crashes or is terminated:
+```bash
+# Terminate a backend pod
+kubectl delete pod -l app=backend -n healthcare --now
+
+# Observe immediate self-healing
+kubectl get pods -n healthcare -l app=backend -w
+```
+Kubernetes detects missing replica count, creates a replacement pod, runs readiness checks, and restores full capacity.
+
+### 2. Database Outage & Readiness Isolation
+```bash
+# Temporarily scale down PostgreSQL
+kubectl scale statefulset postgres --replicas=0 -n healthcare
+
+# Query readiness probe
+curl -i http://localhost:8000/ready
+# Returns HTTP 503 Service Unavailable (Liveness probe /health remains 200 OK)
+
+# Restore PostgreSQL
+kubectl scale statefulset postgres --replicas=1 -n healthcare
+
+# Query readiness probe
+curl -i http://localhost:8000/ready
+# Returns HTTP 200 OK
+```
+
+### 3. Application Rollout & Zero-Downtime Rollback
+```bash
+# View rollout history
+kubectl rollout history deployment/backend-deployment -n healthcare
+
+# If a bad deployment occurs:
+kubectl rollout undo deployment/backend-deployment -n healthcare
+
+# Check status of rollback
+kubectl rollout status deployment/backend-deployment -n healthcare
+```
+
+---
+
+## 💾 Database Backup & Restore Procedure
+
+PostgreSQL-native backups use `pg_dump` and `pg_restore` with synthetic data.
+
+### To take a backup:
+```bash
+# Linux / macOS / Bash:
+./scripts/backup.sh
+
+# Windows (PowerShell):
+.\scripts\backup.ps1
+```
+
+### To restore a backup:
+```bash
+# Linux / macOS / Bash:
+./scripts/restore.sh ./backups/postgres_k8s_20261115_120000.dump
+
+# Windows (PowerShell):
+.\scripts\restore.ps1 -BackupFile "./backups/postgres_k8s_20261115_120000.dump"
+```
 
 ---
 
 ## 🧪 Automated Test Suite
 
-Run the full pytest suite:
+Run the full pytest suite (15 unit and integration tests):
 
-```powershell
+```bash
 python -m pytest backend/tests -v
 ```
 
-### Test Coverage Summary:
-- `test_health.py`: Verifies `/health` and `/ready` probes.
-- `test_appointments.py`: Verifies doctor lookup, slot availability, appointment creation, rescheduling, cancellation, and slot restoration.
-- `test_concurrency.py`: Verifies concurrency safety under concurrent thread load, ensuring no double-booking and checking audit records.
-- `test_auth.py`: Verifies doctor and patient role access.
+### Test Coverage:
+- `test_health.py`: Liveness (`/health`), readiness probe isolation (`/ready`), and Prometheus telemetry (`/metrics`).
+- `test_appointments.py`: Doctor directory, availability slots, appointment lifecycle (create, reschedule, cancel, complete), invalid doctor reference handling, and clinic operating hours validation (08:00 - 18:00).
+- `test_auth.py`: Role-based authentication (Doctor, Patient, Admin) and invalid credential rejection.
+- `test_concurrency.py`: Database-level mutual exclusion test firing 10 concurrent requests simultaneously; guarantees exactly 1 success (`201 Created`) and 9 conflicts (`409 Conflict`).
 
 ---
 
-## 🐳 Docker & Production Deployment
+## 🔒 Security & Trivy Scanning
 
-Run via Docker Compose:
+Run Trivy container and filesystem vulnerability scan locally:
 
 ```bash
-docker compose up --build
+make scan
 ```
-Healthcheck is configured to verify container status via `curl http://localhost:8000/health`.
-
+Or in GitHub Actions: `.github/workflows/ci.yml` automatically scans both Docker images and dependencies for `CRITICAL` and `HIGH` CVEs on every commit and pull request.

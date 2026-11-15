@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY backend /app/backend
 
+# Create non-root application user for container security hardening
+RUN useradd -u 10001 -m appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Expose port
 EXPOSE 8000
 

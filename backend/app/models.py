@@ -69,6 +69,13 @@ class Appointment(Base):
 
     __table_args__ = (
         Index("idx_doc_date_time_status", "doctor_id", "date", "start_time", "status"),
+        Index(
+            "uq_active_appointment",
+            "doctor_id", "date", "start_time",
+            unique=True,
+            sqlite_where=(status.in_(["Confirmed", "Rescheduled"])),
+            postgresql_where=(status.in_(["Confirmed", "Rescheduled"]))
+        ),
     )
 
 class AuditEvent(Base):
