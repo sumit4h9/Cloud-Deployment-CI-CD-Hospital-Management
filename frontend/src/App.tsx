@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Calendar, 
   Clock, 
@@ -123,10 +123,26 @@ export default function App() {
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('doc_1');
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   const [specializationFilter, setSpecializationFilter] = useState<string>('All');
+  const [isBooking, setIsBooking] = useState<boolean>(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
-  const notify = (text: string, type: 'success' | 'error' = 'success') => {
+  // Reschedule state
+  const [isRescheduling, setIsRescheduling] = useState<boolean>(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const notify = (text: string, type: 'success' | 'error' = 'success', duration?: number) => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
     setBannerMessage({ text, type });
-    setTimeout(() => setBannerMessage(null), 4000);
+    const autoDismissMs = duration ?? (type === 'error' ? 8000 : 4000);
+    bannerTimerRef.current = setTimeout(() => {
+      setBannerMessage(null);
+      bannerTimerRef.current = null;
+    }, autoDismissMs);
   };
 
   // Sign in handler
@@ -342,7 +358,9 @@ export default function App() {
   };
 
   const handleReschedule = async () => {
-    if (!selectedAppointment) return;
+    if (!selectedAppointment || isRescheduling) return;
+    setIsRescheduling(true);
+    setRescheduleError(null);
     try {
       const res = await fetch(`${API_BASE}/api/v1/appointments/${selectedAppointment.id}/reschedule`, {
         method: 'PATCH',
@@ -360,15 +378,22 @@ export default function App() {
         notify(`Appointment rescheduled to ${newRescheduleTime}.`);
         setShowRescheduleModal(false);
         setSelectedAppointment(null);
+        setRescheduleError(null);
         fetchData();
       } else {
-        const err = await res.json();
-        notify(err.detail || 'Conflict: Slot unavailable', 'error');
+        const err = await res.json().catch(() => ({ detail: 'Target time slot is already booked.' }));
+        const errorMsg = err.detail || 'Target time slot is already booked.';
+        setRescheduleError(errorMsg);
+        notify(errorMsg, 'error', 10000);
+        fetchData();
       }
     } catch {
       notify(`Rescheduled to ${newRescheduleTime} (offline mode).`);
       setShowRescheduleModal(false);
       setSelectedAppointment(null);
+      setRescheduleError(null);
+    } finally {
+      setIsRescheduling(false);
     }
   };
 
@@ -419,7 +444,9 @@ export default function App() {
   };
 
   const handlePatientBook = async () => {
-    if (!selectedSlot) return;
+    if (!selectedSlot || isBooking) return;
+    setIsBooking(true);
+    setBookingError(null);
     try {
       const res = await fetch(`${API_BASE}/api/v1/appointments`, {
         method: 'POST',
@@ -439,14 +466,22 @@ export default function App() {
       if (res.ok) {
         notify('Appointment confirmed successfully!');
         setSelectedSlot(null);
+        setBookingError(null);
         fetchData();
       } else {
-        const err = await res.json();
-        notify(err.detail || 'Booking conflict: Slot taken', 'error');
+        const err = await res.json().catch(() => ({ detail: 'Selected appointment slot is no longer available' }));
+        const errorMsg = err.detail || 'Time slot is already booked for this doctor.';
+        setBookingError(errorMsg);
+        notify(errorMsg, 'error', 10000);
+        // Refresh slots so the taken slot updates to Booked/disabled in UI
+        fetchData();
       }
     } catch {
       notify('Appointment confirmed (offline mode).');
       setSelectedSlot(null);
+      setBookingError(null);
+    } finally {
+      setIsBooking(false);
     }
   };
 
@@ -1603,7 +1638,10 @@ export default function App() {
                       key={slot.id}
                       disabled={!slot.is_available}
                       className={`slot-chip ${!slot.is_available ? 'disabled' : ''} ${selectedSlot?.id === slot.id ? 'selected' : ''}`}
-                      onClick={() => setSelectedSlot(slot)}
+                      onClick={() => {
+                        setSelectedSlot(slot);
+                        setBookingError(null);
+                      }}
                     >
                       {slot.start_time} {slot.is_available ? '• Available' : '• Booked'}
                     </button>
@@ -1621,6 +1659,14 @@ export default function App() {
                     <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>
                       3. Confirm Appointment
                     </h4>
+                    {bookingError && (
+                      <div className="feedback-banner error" style={{ marginBottom: '14px', fontSize: '13px' }}>
+                        <span>{bookingError}</span>
+                        <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setBookingError(null)}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
                     <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '6px', marginBottom: '16px', fontSize: '13px' }}>
                       <div><strong>Doctor:</strong> {doctors.find(d => d.id === selectedDoctorId)?.name || 'Dr. Ananya Mehta'}</div>
                       <div><strong>Patient:</strong> {session.name}</div>
@@ -1629,10 +1675,11 @@ export default function App() {
                     </div>
                     <button 
                       className="btn-primary" 
-                      style={{ backgroundColor: '#0d9488', borderColor: '#0d9488' }}
+                      style={{ backgroundColor: '#0d9488', borderColor: '#0d9488', opacity: isBooking ? 0.7 : 1 }}
+                      disabled={isBooking}
                       onClick={handlePatientBook}
                     >
-                      Confirm Booking
+                      {isBooking ? 'Booking...' : 'Confirm Booking'}
                     </button>
                   </div>
                 )}
@@ -2210,6 +2257,14 @@ export default function App() {
             </div>
 
             <div className="modal-body">
+              {rescheduleError && (
+                <div className="feedback-banner error" style={{ marginBottom: '14px', fontSize: '13px' }}>
+                  <span>{rescheduleError}</span>
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setRescheduleError(null)}>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
               <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
                 Select a new available time slot for {selectedAppointment.patient_name || 'Patient'}.
               </p>
@@ -2236,7 +2291,10 @@ export default function App() {
                     <button
                       key={s.id}
                       className={`slot-chip ${newRescheduleTime === s.start_time ? 'selected' : ''}`}
-                      onClick={() => setNewRescheduleTime(s.start_time)}
+                      onClick={() => {
+                        setNewRescheduleTime(s.start_time);
+                        setRescheduleError(null);
+                      }}
                     >
                       {s.start_time}
                     </button>
@@ -2249,11 +2307,11 @@ export default function App() {
             </div>
 
             <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRescheduleModal(false)}>
+              <button className="btn-secondary" onClick={() => { setShowRescheduleModal(false); setRescheduleError(null); }}>
                 Back
               </button>
-              <button className="btn-primary" onClick={handleReschedule}>
-                Confirm Reschedule
+              <button className="btn-primary" disabled={isRescheduling} onClick={handleReschedule}>
+                {isRescheduling ? 'Rescheduling...' : 'Confirm Reschedule'}
               </button>
             </div>
           </div>
