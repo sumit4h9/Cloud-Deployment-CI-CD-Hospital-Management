@@ -26,7 +26,7 @@ run: build
 docker-build:
 	docker build -t ghcr.io/sumit4h9/hospital-backend:v1.0.0 ./backend
 	docker build -f ./backend/Dockerfile.worker -t ghcr.io/sumit4h9/hospital-worker:v1.0.0 ./backend
-	docker build -t ghcr.io/sumit4h9/hospital-frontend:v1.0.2 ./frontend
+	docker build -t ghcr.io/sumit4h9/hospital-frontend:v1.0.3 ./frontend
 
 docker-up:
 	docker compose up --build
