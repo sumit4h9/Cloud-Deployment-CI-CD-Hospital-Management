@@ -24,3 +24,4 @@ ENV PYTHONPATH=/app
 
 # Default command: Background job worker loop
 CMD ["python", "-m", "backend.app.worker"]
+
