@@ -21,7 +21,9 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+// In production (e.g. AKS / Docker with Nginx), use relative path / same-origin routing ('').
+// In local development (vite dev server), default to http://localhost:8000 or custom VITE_API_BASE_URL.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 interface Appointment {
   id: string;
