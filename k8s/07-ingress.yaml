@@ -7,10 +7,16 @@ metadata:
     ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  ingressClassName: nginx
+  ingressClassName: webapprouting.kubernetes.azure.com
+  tls:
+    - hosts:
+        - hospital.sumitshelar.online
+      secretName: hospital-tls
   rules:
-    - http:
+    - host: hospital.sumitshelar.online
+      http:
         paths:
           # Route API traffic directly to backend cluster service
           - path: /api
@@ -51,4 +57,3 @@ spec:
                 name: frontend-service
                 port:
                   number: 80
-
