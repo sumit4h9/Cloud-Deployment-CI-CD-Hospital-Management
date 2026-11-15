@@ -29,8 +29,10 @@ jobs:
           ruff check backend
 
       - name: Run Automated API Tests (Concurrency, RBAC & Health)
+        env:
+          PYTHONPATH: .
         run: |
-          pytest backend/tests -v
+          python -m pytest backend/tests -v
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
